@@ -2,6 +2,7 @@
 Препроцессинг изображений перед подачей в Qwen2.5-VL для лучшего чтения диаграмм.
 Используется только Pillow. Авто-логика: апскейл мелких, лёгкое улучшение контраста при необходимости.
 """
+import os
 import tempfile
 from pathlib import Path
 
@@ -12,6 +13,7 @@ MIN_SHORT_SIDE = 512
 TARGET_SHORT_SIDE = 1024
 LOW_CONTRAST_STD = 40
 CONTRAST_FACTOR = 1.2
+MAX_LONG_SIDE = 1024
 
 
 def preprocess_for_vlm(image_path: Path, *, enabled: bool = True) -> Path:
@@ -40,6 +42,20 @@ def preprocess_for_vlm(image_path: Path, *, enabled: bool = True) -> Path:
 
     w, h = img.size
     short_side = min(w, h)
+    long_side = max(w, h)
+    try:
+        max_side = int(os.environ.get("MAX_IMAGE_SIDE", str(MAX_LONG_SIDE)))
+    except ValueError:
+        max_side = MAX_LONG_SIDE
+
+    if max_side and long_side > max_side:
+        scale = max_side / long_side
+        new_w = max(1, int(w * scale))
+        new_h = max(1, int(h * scale))
+        img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        w, h = img.size
+        short_side = min(w, h)
+        long_side = max(w, h)
     need_upscale = short_side < MIN_SHORT_SIDE
     need_contrast = False
     if not need_upscale:
@@ -50,7 +66,8 @@ def preprocess_for_vlm(image_path: Path, *, enabled: bool = True) -> Path:
         return path
 
     if need_upscale:
-        scale = TARGET_SHORT_SIDE / short_side
+        target_short = min(TARGET_SHORT_SIDE, max_side) if max_side else TARGET_SHORT_SIDE
+        scale = target_short / short_side
         new_w = max(1, int(w * scale))
         new_h = max(1, int(h * scale))
         img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
@@ -61,13 +78,11 @@ def preprocess_for_vlm(image_path: Path, *, enabled: bool = True) -> Path:
 
     fd, out_path = tempfile.mkstemp(suffix=".png")
     try:
-        import os
         os.close(fd)
         out = Path(out_path)
         img.save(out, "PNG")
         return out
     except Exception:
-        import os
         try:
             os.close(fd)
         except OSError:

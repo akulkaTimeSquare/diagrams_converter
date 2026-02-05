@@ -37,3 +37,6 @@ wheels/
 # OS
 .DS_Store
 Thumbs.db
+
+*.log
+body.json
