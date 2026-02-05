@@ -7,6 +7,7 @@ import base64
 import logging
 import os
 import tempfile
+import time
 import traceback
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -27,10 +28,36 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Preload VLM on startup so the first request does not wait."""
     use_gpu = os.environ.get("USE_GPU", "").lower() in ("1", "true", "yes")
+    if os.environ.get("SKIP_PRELOAD", "").lower() in ("1", "true", "yes"):
+        logger.info("Skipping VLM preload (SKIP_PRELOAD enabled)")
+        yield
+        return
     try:
         ensure_vlm_loaded(use_gpu=use_gpu)
         backend = get_backend()
         logger.info("VLM preloaded successfully (backend: %s)", backend)
+        warmup_runs = int(os.environ.get("WARMUP_RUNS", "1"))
+        if warmup_runs > 0:
+            from PIL import Image
+            fd, tmp_path = tempfile.mkstemp(suffix=".png")
+            os.close(fd)
+            try:
+                Image.new("RGB", (16, 16), color=(255, 255, 255)).save(tmp_path)
+                for i in range(warmup_runs):
+                    try:
+                        extract_algorithm(
+                            tmp_path,
+                            use_gpu=use_gpu,
+                            max_tokens=16,
+                            use_preprocessing=False,
+                            log_timings=False,
+                        )
+                        logger.info("Warmup run %d/%d completed", i + 1, warmup_runs)
+                    except Exception as e:
+                        logger.warning("Warmup run %d/%d failed: %s", i + 1, warmup_runs, e)
+                        break
+            finally:
+                Path(tmp_path).unlink(missing_ok=True)
     except Exception as e:
         logger.warning("VLM preload failed (first request may be slow or fail): %s", e)
     yield
@@ -110,6 +137,7 @@ async def extract(
     - При **preprocess=true** (по умолчанию): авто-препроцессинг (апскейл мелких, контраст) для изображений.
     - Результат — текст в формате «Шаг | Роль» или список шагов.
     """
+    request_start = time.perf_counter()
     ext = Path(file.filename or "").suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
         raise HTTPException(
@@ -133,6 +161,8 @@ async def extract(
             max_tokens=max_tokens,
             use_preprocessing=preprocess,
         )
+        total = time.perf_counter() - request_start
+        logger.info("extract request total=%.4fs file=%s format=%s", total, file.filename, ext)
         return {
             "algorithm": result,
             "filename": file.filename or "upload",

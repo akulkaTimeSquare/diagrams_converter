@@ -3,8 +3,10 @@ Extract algorithm/process description from diagram images using Qwen2.5-VL-3B.
 Supports: Transformers (primary), llama-cpp-python (optional, when available).
 Single VLM instance is cached and reused for both extract (image→text) and generate (text→PlantUML).
 """
+import logging
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -42,6 +44,8 @@ DIAGRAM_PROMPT = """Извлеки алгоритм или бизнес-проц
 
 _BACKEND: Optional[str] = None
 
+logger = logging.getLogger(__name__)
+
 # Cached VLM instances (singleton per backend)
 _transformers_model: Any = None
 _transformers_processor: Any = None
@@ -64,13 +68,72 @@ def _get_transformers_vlm(use_gpu: bool) -> tuple[Any, Any, str]:
 
         model_id = "Qwen/Qwen2.5-VL-3B-Instruct"
         device = "cuda" if use_gpu else "cpu"
+        device_map_env = os.environ.get("FORCE_DEVICE_MAP")
+        torch_dtype = "float16" if use_gpu else "auto"
+        load_in_8bit = os.environ.get("LOAD_IN_8BIT", "").lower() in ("1", "true", "yes")
+        load_in_4bit = os.environ.get("LOAD_IN_4BIT", "").lower() in ("1", "true", "yes")
+        device_map = device_map_env if device_map_env else ("auto" if use_gpu else None)
+
+        if use_gpu:
+            try:
+                cuda_ver = getattr(__import__("torch").version, "cuda", None)
+                cuda_dev = __import__("torch").cuda.get_device_name(0)
+                logger.info("cuda_available=%s torch_cuda=%s", True, cuda_ver)
+                logger.info("cuda_device=%s", cuda_dev)
+                print(f"cuda_available=True torch_cuda={cuda_ver}")
+                print(f"cuda_device={cuda_dev}")
+                try:
+                    free_mem, total_mem = __import__("torch").cuda.mem_get_info()
+                    logger.info("vram_before free=%d total=%d", free_mem, total_mem)
+                    print(f"vram_before free={free_mem} total={total_mem}")
+                except Exception as e:
+                    logger.info("vram_before unavailable: %s", e)
+                    print(f"vram_before unavailable: {e}")
+            except Exception as e:
+                logger.info("cuda_info unavailable: %s", e)
+                print(f"cuda_info unavailable: {e}")
+
+        logger.info(
+            "transformers_load config: device_map=%s dtype=%s load_in_8bit=%s load_in_4bit=%s",
+            device_map,
+            torch_dtype,
+            load_in_8bit,
+            load_in_4bit,
+        )
+        print(
+            "transformers_load config: "
+            f"device_map={device_map} dtype={torch_dtype} load_in_8bit={load_in_8bit} load_in_4bit={load_in_4bit}"
+        )
+        model_kwargs = {
+            "torch_dtype": torch_dtype,
+            "device_map": device_map,
+        }
+        if load_in_8bit:
+            model_kwargs["load_in_8bit"] = True
+        if load_in_4bit:
+            model_kwargs["load_in_4bit"] = True
         _transformers_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             model_id,
-            torch_dtype="auto",
-            device_map="auto" if use_gpu else None,
+            **model_kwargs,
         )
         if not use_gpu:
             _transformers_model = _transformers_model.to(device)
+        if use_gpu:
+            try:
+                param = next(_transformers_model.parameters())
+                logger.info("model_param device=%s dtype=%s", param.device, param.dtype)
+                print(f"model_param device={param.device} dtype={param.dtype}")
+            except Exception as e:
+                logger.info("model_param unavailable: %s", e)
+                print(f"model_param unavailable: {e}")
+            try:
+                free_mem, total_mem = __import__("torch").cuda.mem_get_info()
+                logger.info("vram_after free=%d total=%d", free_mem, total_mem)
+                print(f"vram_after free={free_mem} total={total_mem}")
+            except Exception as e:
+                logger.info("vram_after unavailable: %s", e)
+                print(f"vram_after unavailable: {e}")
+        _transformers_model.eval()
         _transformers_processor = AutoProcessor.from_pretrained(model_id)
         _transformers_device = device
         _transformers_use_gpu = use_gpu
@@ -175,7 +238,9 @@ def _generate_text_with_transformers_vlm(
         inputs = processor(**processor_kwargs)
         inputs = inputs.to(device)
         with _VLM_LOCK:
-            generated_ids = model.generate(**inputs, max_new_tokens=max_tokens)
+            import torch
+            with torch.inference_mode():
+                generated_ids = model.generate(**inputs, max_new_tokens=max_tokens)
         if generated_ids.shape[0] == 0:
             raise ValueError("VLM returned empty generation (batch size 0)")
         generated_ids_trimmed = [
@@ -350,7 +415,9 @@ def _extract_transformers(
     )
     inputs = inputs.to(device)
     with _VLM_LOCK:
-        generated_ids = model.generate(**inputs, max_new_tokens=max_tokens)
+        import torch
+        with torch.inference_mode():
+            generated_ids = model.generate(**inputs, max_new_tokens=max_tokens)
     generated_ids_trimmed = [
         out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
     ]
@@ -370,6 +437,7 @@ def extract_algorithm(
     max_tokens: int = 1024,
     n_ctx: int = 2048,
     use_preprocessing: bool = True,
+    log_timings: bool = True,
 ) -> str:
     """
     Extract algorithm description from a diagram file or image using Qwen2.5-VL-3B.
@@ -400,6 +468,10 @@ def extract_algorithm(
     from src.image_preprocessing import preprocess_for_vlm
 
     path = Path(image_path)
+    total_start = time.perf_counter()
+    preprocess_time = 0.0
+    inference_time = 0.0
+    postprocess_time = 0.0
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
 
@@ -411,22 +483,54 @@ def extract_algorithm(
 
     # Парсинг BPMN XML (без VLM)
     if ext == ".bpmn" or (ext == ".xml" and is_bpmn_xml(path)):
+        parse_start = time.perf_counter()
         result = parse_bpmn(path)
+        preprocess_time += time.perf_counter() - parse_start
         if result:
+            if log_timings:
+                total = time.perf_counter() - total_start
+                print(
+                    f"timings extract (bpmn): preprocess={preprocess_time:.4f}s "
+                    f"inference={inference_time:.4f}s postprocess={postprocess_time:.4f}s total={total:.4f}s"
+                )
+                logger.info(
+                    "timings extract (bpmn): preprocess=%.4fs inference=%.4fs postprocess=%.4fs total=%.4fs",
+                    preprocess_time,
+                    inference_time,
+                    postprocess_time,
+                    total,
+                )
             return result
         if ext == ".bpmn":
             raise ValueError("Failed to parse BPMN file")
 
     # Парсинг draw.io (без VLM)
     if ext == ".drawio":
+        parse_start = time.perf_counter()
         result = parse_drawio(path)
+        preprocess_time += time.perf_counter() - parse_start
         if result:
+            if log_timings:
+                total = time.perf_counter() - total_start
+                print(
+                    f"timings extract (drawio): preprocess={preprocess_time:.4f}s "
+                    f"inference={inference_time:.4f}s postprocess={postprocess_time:.4f}s total={total:.4f}s"
+                )
+                logger.info(
+                    "timings extract (drawio): preprocess=%.4fs inference=%.4fs postprocess=%.4fs total=%.4fs",
+                    preprocess_time,
+                    inference_time,
+                    postprocess_time,
+                    total,
+                )
             return result
         raise ValueError("Failed to parse draw.io file")
 
     # Конвертация в изображение и вызов VLM
     if ext == ".svg":
+        convert_start = time.perf_counter()
         png_path = convert_svg_to_png(path)
+        preprocess_time += time.perf_counter() - convert_start
         try:
             return extract_algorithm(
                 png_path,
@@ -436,12 +540,15 @@ def extract_algorithm(
                 max_tokens,
                 n_ctx,
                 use_preprocessing,
+                log_timings=False,
             )
         finally:
             png_path.unlink(missing_ok=True)
 
     if ext in (".uml", ".puml"):
+        render_start = time.perf_counter()
         png_path = render_plantuml_to_png(path)
+        preprocess_time += time.perf_counter() - render_start
         if png_path:
             try:
                 return extract_algorithm(
@@ -452,6 +559,7 @@ def extract_algorithm(
                     max_tokens,
                     n_ctx,
                     use_preprocessing,
+                    log_timings=False,
                 )
             finally:
                 png_path.unlink(missing_ok=True)
@@ -460,7 +568,9 @@ def extract_algorithm(
         )
 
     # Растровое изображение — препроцессинг и VLM
+    pre_start = time.perf_counter()
     preprocessed_path = preprocess_for_vlm(path, enabled=use_preprocessing)
+    preprocess_time += time.perf_counter() - pre_start
     try:
         backend = _detect_backend()
         if backend == "llama_cpp":
@@ -468,7 +578,8 @@ def extract_algorithm(
                 Path(model_path) if model_path else None,
                 Path(mmproj_path) if mmproj_path else None,
             )
-            return _extract_llama_cpp(
+            infer_start = time.perf_counter()
+            result = _extract_llama_cpp(
                 preprocessed_path,
                 resolved_model,
                 resolved_mmproj,
@@ -476,7 +587,25 @@ def extract_algorithm(
                 max_tokens,
                 n_ctx,
             )
-        return _extract_transformers(preprocessed_path, use_gpu, max_tokens)
+            inference_time += time.perf_counter() - infer_start
+        else:
+            infer_start = time.perf_counter()
+            result = _extract_transformers(preprocessed_path, use_gpu, max_tokens)
+            inference_time += time.perf_counter() - infer_start
+        return result
     finally:
         if preprocessed_path != path and preprocessed_path.exists():
             preprocessed_path.unlink(missing_ok=True)
+        if log_timings:
+            total = time.perf_counter() - total_start
+            print(
+                f"timings extract: preprocess={preprocess_time:.4f}s inference={inference_time:.4f}s "
+                f"postprocess={postprocess_time:.4f}s total={total:.4f}s"
+            )
+            logger.info(
+                "timings extract: preprocess=%.4fs inference=%.4fs postprocess=%.4fs total=%.4fs",
+                preprocess_time,
+                inference_time,
+                postprocess_time,
+                total,
+            )
