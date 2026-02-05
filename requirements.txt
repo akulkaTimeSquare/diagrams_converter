@@ -20,6 +20,7 @@ plantuml>=0.3.0
 
 # REST API
 fastapi>=0.115.0
+jinja2
 uvicorn[standard]>=0.32.0
 python-multipart>=0.0.9
 
