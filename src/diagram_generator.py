@@ -2,6 +2,9 @@
 Генерация диаграммы из текста алгоритма.
 Текст → общая VLM (Qwen2.5-VL) → PlantUML activity → PNG.
 """
+import logging
+import os
+import time
 from pathlib import Path
 from typing import Literal
 
@@ -11,6 +14,8 @@ from src.diagram_extractor import (
     _generate_text_with_transformers_vlm,
     _resolve_llama_paths,
 )
+
+logger = logging.getLogger(__name__)
 
 GENERATE_PROMPT = """По описанию алгоритма сгенерируй только код PlantUML для activity-диаграммы.
 Правила:
@@ -44,6 +49,27 @@ def _postprocess_plantuml_response(response: str) -> str:
     return response
 
 
+def _generate_text_with_llamacpp_server(messages: list[dict], max_tokens: int) -> str:
+    """Generate text using an external llama.cpp server (OpenAI-compatible)."""
+    import requests
+
+    url = os.environ.get("LLAMACPP_URL", "http://localhost:8080/v1/chat/completions")
+    model_name = os.environ.get("LLAMACPP_MODEL", "llama.cpp")
+    payload = {
+        "model": model_name,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": 0.1,
+    }
+    resp = requests.post(url, json=payload, timeout=120)
+    resp.raise_for_status()
+    data = resp.json()
+    choices = data.get("choices") or []
+    if not choices:
+        raise ValueError("llama.cpp server returned empty choices")
+    return choices[0]["message"]["content"].strip()
+
+
 def generate_plantuml_from_algorithm(
     algorithm_text: str,
     use_gpu: bool = False,
@@ -53,18 +79,28 @@ def generate_plantuml_from_algorithm(
     Сгенерировать исходный код PlantUML (activity) по тексту алгоритма.
     Использует общую загруженную VLM (Qwen2.5-VL) в режиме текст → текст.
     """
-    backend = _detect_backend()
     messages = [
         {"role": "system", "content": GENERATE_PROMPT},
         {"role": "user", "content": f"Алгоритм:\n\n{algorithm_text}"},
     ]
-    if backend == "transformers":
+    backend = _detect_backend()
+    backend_env = os.environ.get("LLM_BACKEND", "").strip().lower()
+    gen_start = time.perf_counter()
+    if backend_env == "llamacpp":
+        response = _generate_text_with_llamacpp_server(messages, max_tokens)
+        backend_label = "llamacpp_server"
+    elif backend == "transformers":
         response = _generate_text_with_transformers_vlm(messages, use_gpu, max_tokens)
+        backend_label = "transformers"
     else:
         resolved_model, resolved_mmproj = _resolve_llama_paths(None, None)
         response = _generate_text_with_llama_cpp_vlm(
             messages, use_gpu, max_tokens, resolved_model, resolved_mmproj
         )
+        backend_label = "llama_cpp"
+    gen_time = time.perf_counter() - gen_start
+    print(f"timings generate: backend={backend_label} total={gen_time:.4f}s")
+    logger.info("timings generate: backend=%s total=%.4fs", backend_label, gen_time)
     return _postprocess_plantuml_response(response)
 
 

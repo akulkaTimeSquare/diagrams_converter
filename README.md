@@ -89,6 +89,28 @@ $env:USE_GPU = "true"
 .venv\Scripts\uvicorn.exe src.api:app --reload --host 0.0.0.0 --port 8000
 ```
 
+**Env variables (runtime tuning):**
+
+```powershell
+# Skip model preload on startup (useful for fast API start)
+$env:SKIP_PRELOAD = "1"
+
+# Limit max image side before VLM (768 or 1024 recommended for speed)
+$env:MAX_IMAGE_SIDE = "768"
+
+# Force GPU placement (try full GPU load)
+$env:FORCE_DEVICE_MAP = "cuda"
+
+# Optional quantization (requires bitsandbytes and model support)
+$env:LOAD_IN_8BIT = "1"
+$env:LOAD_IN_4BIT = "0"
+```
+
+**Timing logs:**
+The service prints timing lines to stdout:
+`timings extract: preprocess=... inference=... total=...`
+`timings generate: backend=... total=...`
+
 При старте сервис пытается предзагрузить VLM (lifespan). Если предзагрузка не удалась (нет памяти и т.п.), сервер всё равно запустится; первый запрос к VLM может быть медленным или завершиться ошибкой.
 
 После запуска:
@@ -316,6 +338,22 @@ print(plantuml_source)
 
 - **Transformers** (по умолчанию): Hugging Face `Qwen2.5-VL-3B-Instruct`. Работает на Windows/Linux, CPU/GPU. Модель скачивается при первом использовании.
 - **llama-cpp-python**: GGUF-модели (например, Mungert/Qwen2.5-VL-3B-Instruct-GGUF). Меньше потребление RAM при квантизации, удобно для Docker/Linux. Если пакет установлен, он выбирается первым (приоритет над Transformers).
+
+### llama-server (external OpenAI-compatible)
+
+Можно направить **/generate-diagram** на внешний llama-server:
+
+```powershell
+# Start llama-server (example)
+llama-server -m C:\path\model.gguf --port 8080
+
+# Use llama-server for generate-diagram
+$env:LLM_BACKEND = "llamacpp"
+$env:LLAMACPP_URL = "http://127.0.0.1:8080/v1/chat/completions"
+$env:LLAMACPP_MODEL = "local-gguf"
+```
+
+Note: this only affects text generation (/generate-diagram). /extract still uses the VLM.
 
 ### Настройка llama.cpp с Qwen2.5-VL
 
