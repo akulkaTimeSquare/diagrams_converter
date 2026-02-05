@@ -14,9 +14,6 @@
 - [Использование из Python](#использование-из-python)
 - [Поддерживаемые форматы](#поддерживаемые-форматы)
 - [Бэкенды (Transformers / llama.cpp)](#бэкенды-transformers--llamacpp)
-- [Структура проекта](#структура-проекта)
-- [Устранение неполадок](#устранение-неполадок)
-- [Лицензии](#лицензии)
 
 ---
 
@@ -243,7 +240,12 @@ curl -X POST "http://127.0.0.1:8000/generate-diagram?download=true" \
 from src.diagram_extractor import extract_algorithm
 
 # Изображение — обрабатывается VLM
-result = extract_algorithm("Picture/1.png", use_gpu=False, max_tokens=256)
+result = extract_algorithm(
+    "Picture/1.png",
+    use_gpu=False,
+    max_tokens=256,
+    use_preprocessing=True,  # апскейл мелких, улучшение контраста (по умолчанию True)
+)
 print(result)
 
 # BPMN / drawio — парсинг XML, без модели
@@ -285,6 +287,10 @@ print(plantuml_source)
 ### Запуск тестов
 
 ```powershell
+# Тест форматов (BPMN, drawio) — без VLM
+.venv\Scripts\python.exe tests\test_formats.py
+
+# Тест извлечения из изображения через VLM (загрузка модели ~6 GB)
 .venv\Scripts\python.exe tests\test_qwen_integration.py
 ```
 
@@ -368,36 +374,3 @@ print(plantuml_source)
 ```
 
 Должно вывести `Backend: llama_cpp`, если llama-cpp-python установлен и модели на месте.
-
----
-
-## Структура проекта
-
-```
-diagrams/
-├── models/                    # GGUF + mmproj для llama.cpp (создаётся download_models.py)
-├── src/
-│   ├── api.py                 # FastAPI: /extract, /generate-diagram, /docs, /health
-│   ├── diagram_extractor.py   # Извлечение: диаграмма → текст (VLM, BPMN, drawio)
-│   ├── diagram_formats.py     # Парсинг .bpmn/.drawio, конвертация .svg/.uml, рендер PlantUML
-│   ├── image_preprocessing.py # Препроцессинг изображений перед VLM (апскейл, контраст)
-│   ├── diagram_generator.py   # Генерация: текст алгоритма → PlantUML → PNG
-│   └── __init__.py
-├── scripts/
-│   └── download_models.py     # Скачивание GGUF + mmproj (llama.cpp)
-├── tests/
-│   ├── test_qwen_integration.py
-│   └── test_formats.py
-├── requirements.txt
-└── README.md
-```
-
----
-
-## Устранение неполадок
-
-- **Сервер запустился, но первый запрос к /extract или /generate-diagram очень долгий** — идёт загрузка модели с Hugging Face. Дождитесь завершения или включите предзагрузку (она уже в lifespan при старте uvicorn).
-- **Out of memory (OOM)** — используйте CPU (`USE_GPU` не задавать или `false`), либо llama.cpp с квантизацией q4_k_m и предсобранным CPU-wheel.
-- **PNG не возвращается в /generate-diagram** — проверьте доступ в интернет к `https://www.plantuml.com/plantuml`. В ответе смотрите `render_note`.
-- **«Неподдерживаемый формат» в /extract** — проверьте список в **GET /formats** и расширение загружаемого файла.
-- **Windows: python не найден** — используйте `py` или полный путь `.venv\Scripts\python.exe` / `.venv\Scripts\uvicorn.exe`.
