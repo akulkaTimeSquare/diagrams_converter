@@ -1,0 +1,29 @@
+# Diagram-to-algorithm extraction service
+# Python 3.11+
+
+# Primary: Hugging Face Transformers (works on Windows/Linux, CPU/GPU)
+transformers>=4.49.0
+accelerate>=0.30.0
+torch>=2.0.0
+torchvision>=0.15.0
+qwen-vl-utils>=0.0.8
+Pillow>=10.0.0
+
+# Model downloads
+huggingface-hub>=0.20.0
+
+# Formats: SVG -> image for VLM
+cairosvg>=2.7.0
+
+# Optional: .uml / .puml (PlantUML) render to image (uses remote server)
+plantuml>=0.3.0
+
+# REST API
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.9
+
+# Optional: llama-cpp-python + Qwen2.5-VL GGUF (меньше RAM, удобно для Docker)
+# После установки запустите: python scripts/download_models.py
+# pip install llama-cpp-python
+# llama-cpp-python>=0.2.90
