@@ -17,13 +17,15 @@ REPO_ID = "Mungert/Qwen2.5-VL-3B-Instruct-GGUF"
 MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
 MMPROJ_FILENAME = "Qwen2.5-VL-3B-Instruct-mmproj-f16.gguf"
 
-# Доступные квантизации в репозитории (файл ~2 GB для q4_k_m)
+# Доступные квантизации (размер ~2 GB q4_k_m … ~4 GB q8_0 / f16-q8_0; в 7GB VRAM укладывается f16-q8_0)
 QUANT_FILENAMES = {
-    "q4_k_m": "Qwen2.5-VL-3B-Instruct-q4_k_m.gguf",
+    "q4_0": "Qwen2.5-VL-3B-Instruct-q4_0.gguf",
     "q4_k_s": "Qwen2.5-VL-3B-Instruct-q4_k_s.gguf",
+    "q4_k_m": "Qwen2.5-VL-3B-Instruct-q4_k_m.gguf",
     "q5_k_m": "Qwen2.5-VL-3B-Instruct-q5_k_m.gguf",
     "q8_0": "Qwen2.5-VL-3B-Instruct-q8_0.gguf",
-    "q4_0": "Qwen2.5-VL-3B-Instruct-q4_0.gguf",
+    "f16-q8_0": "Qwen2.5-VL-3B-Instruct-f16-q8_0.gguf",
+    "bf16-q8_0": "Qwen2.5-VL-3B-Instruct-bf16-q8_0.gguf",
 }
 
 
@@ -31,9 +33,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Download Qwen2.5-VL-3B GGUF for llama.cpp")
     parser.add_argument(
         "--quant",
-        default="q4_k_m",
+        default="q8_0",
         choices=list(QUANT_FILENAMES),
-        help="Квантизация модели (q4_k_m — по умолчанию, меньше RAM)",
+        help="Квантизация (q8_0 по умолчанию; q4_k_m — экономия RAM)",
     )
     args = parser.parse_args()
     llm_filename = QUANT_FILENAMES[args.quant]
@@ -60,5 +62,5 @@ def main() -> None:
     )
     print(f"Downloaded mmproj: {mmproj_path}")
     print("Done. Restart the app to use llama.cpp with local models.")
-    if args.quant != "q4_k_m":
-        print(f"Set env LLAMA_MODEL_PATH={llm_path} (or use default q4_k_m in models/)")
+    if args.quant != "q8_0":
+        print(f"Set env LLAMA_QUANT={args.quant} (or use default q8_0 in app)")

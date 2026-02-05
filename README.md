@@ -47,7 +47,7 @@
 
 ## Установка
 
-Из корня проекта (`diagrams`). Если команда `python` не найдена — используйте `py`:
+Из корня проекта. Если команда `python` не найдена — используйте `py`:
 
 ```powershell
 # Создание виртуального окружения
@@ -57,9 +57,11 @@ py -m venv .venv
 # Активация (PowerShell)
 .venv\Scripts\Activate.ps1
 
-# Установка зависимостей
+# Установка зависимостей (Transformers / CPU или GPU)
 .venv\Scripts\pip install -r requirements.txt
 ```
+
+Для сборки Docker с llama-cpp используется `requirements-llamacpp.txt` (см. [Docker](#docker-llama-cpp--gpu)).
 
 При первом запросе к VLM (или при старте API с предзагрузкой) модель **Qwen2.5-VL-3B** (~6 GB) будет загружена с Hugging Face. Обработка одного изображения: примерно 15–60 сек на CPU, 5–15 сек на GPU.
 
@@ -105,6 +107,21 @@ $env:FORCE_DEVICE_MAP = "cuda"
 $env:LOAD_IN_8BIT = "1"
 $env:LOAD_IN_4BIT = "0"
 ```
+
+### Docker (llama-cpp + GPU)
+
+Для запуска в контейнере с **llama-cpp** и **поддержкой GPU** (CUDA):
+
+```powershell
+# Сборка и запуск с GPU
+docker compose up -d --build
+
+# Или вручную (из корня проекта):
+docker build -f Dockerfile.llamacpp -t diagrams-converter-llamacpp .
+docker run -d -p 8000:8000 -e USE_GPU=true --gpus all diagrams-converter-llamacpp
+```
+
+Требуется: Docker, NVIDIA Container Toolkit, видеокарта NVIDIA. `Dockerfile.llamacpp` устанавливает llama-cpp-python с CUDA 12.4 (wheel cu124). **CUDA 13 драйвер** поддерживает контейнер с CUDA 12.4 (обратная совместимость).
 
 **Timing logs:**
 The service prints timing lines to stdout:
@@ -381,29 +398,30 @@ Note: this only affects text generation (/generate-diagram). /extract still uses
 
 #### 2. Скачивание моделей
 
-Из корня проекта:
+Из корня проекта (каталог `scripts/`):
 
 ```powershell
 .venv\Scripts\python.exe scripts\download_models.py
 ```
 
-Скрипт создаёт каталог `models/` и загружает:
+Скрипт создаёт каталог `models/` и по умолчанию загружает **q8_0**:
 
-- `Qwen2.5-VL-3B-Instruct-q4_k_m.gguf` (~2 GB)
+- `Qwen2.5-VL-3B-Instruct-q8_0.gguf` (~4 GB)
 - `Qwen2.5-VL-3B-Instruct-mmproj-f16.gguf` (~1.3 GB)
 
-Другая квантизация (больше точность, больше RAM):
+Для экономии VRAM:
 
 ```powershell
-.venv\Scripts\python.exe scripts\download_models.py --quant q8_0
+.venv\Scripts\python.exe scripts\download_models.py --quant q4_k_m
 ```
 
-Для нестандартных путей задайте переменные окружения перед запуском:
+Для нестандартных путей или другой квантизации задайте переменные окружения перед запуском:
 
 - `LLAMA_MODEL_PATH` — путь к файлу GGUF модели.
 - `LLAMA_MMPROJ_PATH` — путь к файлу mmproj.
+- `LLAMA_QUANT` — квантизация при автозагрузке с HF (по умолчанию `q8_0`; варианты: `q4_0`, `q4_k_s`, `q4_k_m`, `q5_k_m`, `q8_0`, `f16-q8_0`, `bf16-q8_0`).
 
-Если в `models/` лежат файлы с именами по умолчанию (q4_k_m и mmproj-f16), они подхватываются автоматически.
+Если в `models/` лежат файлы с именами по умолчанию (q8_0 и mmproj-f16), они подхватываются автоматически.
 
 #### 3. Проверка бэкенда
 
