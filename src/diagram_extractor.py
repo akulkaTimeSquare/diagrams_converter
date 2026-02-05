@@ -14,33 +14,62 @@ from typing import Any, Optional, Union
 _VLM_LOCK = threading.Lock()
 
 # Пути по умолчанию для llama.cpp (каталог проекта/models/)
-_DEFAULT_LLAMA_MODEL = "Qwen2.5-VL-3B-Instruct-q4_k_m.gguf"
+# По умолчанию q8_0; q4_k_m — экономия RAM
+_LLAMA_QUANT_OPTIONS = (
+    "q4_0", "q4_k_s", "q4_k_m", "q5_k_m", "q8_0",
+    "f16-q8_0", "bf16-q8_0", 
+)
 _DEFAULT_LLAMA_MMPROJ = "Qwen2.5-VL-3B-Instruct-mmproj-f16.gguf"
 
-# Промпт для извлечения алгоритма в формате, совпадающем с test.txt
-DIAGRAM_PROMPT = """Извлеки алгоритм или бизнес-процесс с этой диаграммы. Ответь только на русском языке.
 
-Роли — только если есть дорожки на диаграмме:
-- Дорожки (swimlanes/lanes) = отдельные горизонтальные или вертикальные полосы, у каждой есть подпись с названием роли (например "Инициатор", "Координатор") прямо на диаграмме.
-- Если таких полос с подписями НЕТ — это диаграмма без ролей. Запрещено: придумывать роли, писать "| Роль", "Инициатор", "Координатор", "Руководитель" и т.п. Вывод только: первая строка "Шаг", далее "1. Текст", "2. Текст", ... — без символа "|" и без любых названий ролей.
-- Если дорожки ЕСТЬ — используй формат с колонкой "Роль" (см. ниже). Роль берётся только из подписи дорожки, в которой стоит фигура.
+def _get_llama_quant() -> str:
+    """Квантизация GGUF из env LLAMA_QUANT (по умолчанию q8_0)."""
+    q = os.environ.get("LLAMA_QUANT", "q8_0").strip()
+    if q in _LLAMA_QUANT_OPTIONS:
+        return q
+    if q.lower() in ("f16-q8_0", "bf16-q8_0"):
+        return "f16-q8_0" if "f16" in q.lower() else "bf16-q8_0"
+    return "q8_0"
 
-Формат при наличии дорожек (BPMN с ролями):
-- Первая строка: "Шаг" + табы/пробелы + "| Роль". Каждая строка: "N. Текст" + выравнивание + "| Роль". Роль = полное название дорожки с диаграммы. Конечные события не выводи как шаг.
 
-Формат без дорожек (нет ролей):
-- Первая строка: "Шаг". Далее: "1. Текст", "2. Текст", ... — без "|" и без ролей.
+def _default_llama_model_filename() -> str:
+    return f"Qwen2.5-VL-3B-Instruct-{_get_llama_quant()}.gguf"
 
-Без дублирования:
-- Каждая фигура (прямоугольник задачи, ромб решения, событие) входит в список ровно один раз. Не повторяй один и тот же шаг с разными номерами. Количество пунктов = количеству узлов на диаграмме (минус конечные кружки при необходимости).
+# Промпт для извлечения алгоритма (формат как в примере: Шаг + нумерованный список или Шаг | Роль)
+DIAGRAM_PROMPT = """Ты — ассистент по анализу бизнес-процессов. Твоя задача — перевести изображение диаграммы (блок-схемы) в текстовый список шагов.
 
-Ветвления (строго):
-- Запрещено объединять ветки в одну строку. Нельзя писать "Да -> Договориться о графике", "Нет -> Фокус на учебе" и т.п. Каждый узел — отдельная строка: "N. Текст из фигуры" (только текст, который написан внутри фигуры). Подписи на стрелках (да, нет, Да, Нет) в текст шага не включай и не используй как префикс.
-- Ромб решения — один пункт списка с текстом из ромба (например "4. Найдена?").
-- Порядок после ромба: сначала пройди одну ветку до конца (все узлы по стрелкам до конечного состояния или слияния), затем вторую ветку целиком, затем общее продолжение если есть. Пример: после "Найдена?" идут "5. Договориться о графике", "6. Совмещение работы и учебы", затем "7. Фокус на учебе", "8. Только учеба" — каждая фигура отдельным пунктом, без "Да"/"Нет" в тексте шага.
-- Кружки конечных состояний (например "Совмещение работы и учебы", "Только учеба") выводи как отдельные шаги, если на них есть подпись.
+### ИНСТРУКЦИИ:
+1. Внимательно проследи стрелки от начала (Start) до конца.
+2. Игнорируй подписи на стрелках (Да/Нет).
+3. Текст бери строго из фигур. Не выдумывай.
+4. ФОРМАТ ЗАВИСИТ ОТ НАЛИЧИЯ ДОРОЖЕК (Swimlanes).
 
-Текст шага — дословно с диаграммы (без замены слов). Включай только текст из фигур (прямоугольник, ромб, кружок)."""
+### ПРИМЕРЫ (Следи за форматом):
+
+<example_1_with_swimlanes>
+ВХОД: Диаграмма с дорожками "Инициатор" и "Менеджер".
+ВЫВОД:
+Шаг | Роль
+1. Создание заявки | Инициатор
+2. Проверка бюджета | Менеджер
+3. Утверждение | Менеджер
+</example_1_with_swimlanes>
+
+<example_2_simple_flowchart>
+ВХОД: Простая схема без подписанных дорожек.
+ВЫВОД:
+Шаг
+1. Запуск двигателя
+2. Прогрев
+3. Начало движения
+</example_2_simple_flowchart>
+
+### ТВОЯ ЗАДАЧА:
+Проанализируй загруженную картинку.
+Если ты видишь горизонтальные или вертикальные полосы с именами (роли) — используй формат с колонкой "Роль".
+Если полос нет — используй простой нумерованный список.
+
+Выведи ТОЛЬКО результат. Никаких вступлений, никаких рассуждений."""
 
 _BACKEND: Optional[str] = None
 
@@ -158,13 +187,16 @@ def _get_llama_cpp_vlm(
         from llama_cpp.llama_chat_format import Qwen25VLChatHandler
 
         if model_path is None and mmproj_path is None:
+            quant = _get_llama_quant()
+            # Точное имя файла, чтобы не совпало с bf16-q8_0 / f16-q8_0 и т.д.
+            llm_filename = f"Qwen2.5-VL-3B-Instruct-{quant}.gguf"
             _llama_chat_handler = Qwen25VLChatHandler.from_pretrained(
                 repo_id="Mungert/Qwen2.5-VL-3B-Instruct-GGUF",
-                filename="*mmproj*",
+                filename="Qwen2.5-VL-3B-Instruct-mmproj-f16.gguf",
             )
             _llama_llm = Llama.from_pretrained(
                 repo_id="Mungert/Qwen2.5-VL-3B-Instruct-GGUF",
-                filename="*q4_k_m*",
+                filename=llm_filename,
                 chat_handler=_llama_chat_handler,
                 n_ctx=n_ctx,
                 n_gpu_layers=-1 if use_gpu else 0,
@@ -240,7 +272,11 @@ def _generate_text_with_transformers_vlm(
         with _VLM_LOCK:
             import torch
             with torch.inference_mode():
-                generated_ids = model.generate(**inputs, max_new_tokens=max_tokens)
+                generated_ids = model.generate(
+                    **inputs,
+                    max_new_tokens=max_tokens,
+                    repetition_penalty=1.15,
+                )
         if generated_ids.shape[0] == 0:
             raise ValueError("VLM returned empty generation (batch size 0)")
         generated_ids_trimmed = [
@@ -274,6 +310,7 @@ def _generate_text_with_llama_cpp_vlm(
             messages=messages,
             max_tokens=max_tokens,
             temperature=0.1,
+            repeat_penalty=1.15,
         )
     choices = response.get("choices") or []
     if not choices:
@@ -306,7 +343,7 @@ def _resolve_llama_paths(
         return out_model, out_mmproj
     project_root = Path(__file__).resolve().parent.parent
     models_dir = project_root / "models"
-    candidate_model = models_dir / _DEFAULT_LLAMA_MODEL
+    candidate_model = models_dir / _default_llama_model_filename()
     candidate_mmproj = models_dir / _DEFAULT_LLAMA_MMPROJ
     if candidate_model.exists() and candidate_mmproj.exists():
         return candidate_model, candidate_mmproj
@@ -363,7 +400,7 @@ def _extract_llama_cpp(
     llm = _get_llama_cpp_vlm(use_gpu, model_path, mmproj_path, n_ctx)
     data_uri = _to_data_uri(image_path)
     messages = [
-        {"role": "system", "content": "Ты извлекаешь из диаграмм список шагов по стрелкам (сверху вниз, справа налево). Если есть дорожки BPMN с ролями — выводи «Шаг | Роль» и для каждого шага «N. Текст | Роль». Конечные события (кружок «принята»/«отклонена») не выводи как шаг. Только текст из фигур; подписи на стрелках не включай. Ответ на русском."},
+        {"role": "system", "content": "Извлекаешь алгоритм с диаграммы: один раз обходи фигуры по стрелкам, выводи только нумерованный список. Текст шага — дословно из подписи в фигуре. Дорожки с подписями есть → формат «Шаг | Роль», роли с диаграммы. Дорожек нет → только «Шаг» и «1. Текст» без ролей. Без повторов и без придуманного текста. Ответ на русском."},
         {
             "role": "user",
             "content": [
@@ -377,6 +414,7 @@ def _extract_llama_cpp(
             messages=messages,
             max_tokens=max_tokens,
             temperature=0.1,
+            repeat_penalty=1.15,
         )
     return response["choices"][0]["message"]["content"].strip()
 
@@ -394,7 +432,7 @@ def _extract_transformers(
     messages = [
         {
             "role": "system",
-            "content": "Ты извлекаешь из диаграмм список шагов по стрелкам (сверху вниз, справа налево). Если есть дорожки BPMN с ролями — выводи «Шаг | Роль» и для каждого шага «N. Текст | Роль». Конечные события (кружок «принята»/«отклонена») не выводи как шаг. Только текст из фигур; подписи на стрелках не включай. Ответ на русском.",
+            "content": "Извлекаешь алгоритм с диаграммы: один раз обходи фигуры по стрелкам, выводи только нумерованный список. Текст шага — дословно из подписи в фигуре. Дорожки с подписями есть → формат «Шаг | Роль», роли с диаграммы. Дорожек нет → только «Шаг» и «1. Текст» без ролей. Без повторов и без придуманного текста. Ответ на русском.",
         },
         {
             "role": "user",
@@ -417,7 +455,11 @@ def _extract_transformers(
     with _VLM_LOCK:
         import torch
         with torch.inference_mode():
-            generated_ids = model.generate(**inputs, max_new_tokens=max_tokens)
+            generated_ids = model.generate(
+                **inputs,
+                max_new_tokens=max_tokens,
+                repetition_penalty=1.15,
+            )
     generated_ids_trimmed = [
         out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
     ]

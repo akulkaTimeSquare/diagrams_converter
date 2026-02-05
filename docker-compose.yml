@@ -1,0 +1,21 @@
+services:
+  diagrams-converter:
+    build:
+      context: .
+      dockerfile: Dockerfile.llamacpp
+    image: diagrams-converter-llamacpp:latest
+    container_name: diagrams-converter
+    ports:
+      - "8000:8000"
+    environment:
+      - USE_GPU=true
+      - SKIP_PRELOAD=1
+      - MAX_IMAGE_SIDE=1024
+      - LLAMA_QUANT=q8_0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
