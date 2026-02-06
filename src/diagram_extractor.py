@@ -35,41 +35,24 @@ def _get_llama_quant() -> str:
 def _default_llama_model_filename() -> str:
     return f"Qwen2.5-VL-3B-Instruct-{_get_llama_quant()}.gguf"
 
-# Промпт для извлечения алгоритма (формат как в примере: Шаг + нумерованный список или Шаг | Роль)
-DIAGRAM_PROMPT = """Ты — ассистент по анализу бизнес-процессов. Твоя задача — перевести изображение диаграммы (блок-схемы) в текстовый список шагов.
+# Промпт для извлечения алгоритма (формат: Шаг + нумерованный список или Шаг | Роль)
+DIAGRAM_PROMPT = """Извлеки алгоритм из этой диаграммы. Обойди фигуры по стрелкам от начала до конца. Читай и копируй текст только из ВНУТРЕННОСТИ фигур (прямоугольник, ромб, круг) ДОСЛОВНО — каждую букву как на изображении (например: «резюме», «гибкую работу», «Договориться», «учебы»/«учебе»/«учеба»).
 
-### ИНСТРУКЦИИ:
-1. Внимательно проследи стрелки от начала (Start) до конца.
-2. Игнорируй подписи на стрелках (Да/Нет).
-3. Текст бери строго из фигур. Не выдумывай.
-4. ФОРМАТ ЗАВИСИТ ОТ НАЛИЧИЯ ДОРОЖЕК (Swimlanes).
+Правила:
+— Шаг = только то, что написано ВНУТРИ какой-то фигуры. Не придумывай шагов (никаких «Таймер: X», «Завершено: X», «Найти работу» вместо «Искать гибкую работу», если так не написано в фигуре).
+— Включай ВСЕ узлы: прямоугольники, ромбы, круги (конечные). Каждая фигура = ровно один шаг.
+— После ромба решения обойди ОБЕ ветки: сначала одну до конца (до круга/конца), потом вторую. Все конечные узлы должны войти в список.
+— Текст шага = точная надпись в фигуре. Не перефразируй (не «Договорюсь», а как написано — «Договориться»).
+— Подписи на СТРЕЛКАХ (Да, Нет) — не шаги, не включать. Они не являются дорожками/ролями.
+— Если в диаграмме есть префиксы в фигурах — сохраняй: Событие:, Таймер:, Действие:, Завершено:
+— Ромбы решений — как шаги: «N. Текст вопроса?» (дословно из ромба).
+— Дубли нумерации (два «4.») — оставить.
 
-### ПРИМЕРЫ (Следи за форматом):
+Формат вывода — строго ОДИН из двух:
+А) Есть настоящие дорожки (swimlanes — отдельные полосы/дорожки с подписанными ролями, например «Студент», «Деканат»): первая строка «Шаг | Роль», далее «Текст шага | Название дорожки». Не считай дорожками подписи Да/Нет на стрелках — для таких диаграмм используй формат Б.
+Б) Нет дорожек ИЛИ только подписи Да/Нет на стрелках: первая строка только «Шаг». Далее — нумерованный список: «1. Текст», «2. Текст», … Без символа «|», без второй колонки.
 
-<example_1_with_swimlanes>
-ВХОД: Диаграмма с дорожками "Инициатор" и "Менеджер".
-ВЫВОД:
-Шаг | Роль
-1. Создание заявки | Инициатор
-2. Проверка бюджета | Менеджер
-3. Утверждение | Менеджер
-</example_1_with_swimlanes>
-
-<example_2_simple_flowchart>
-ВХОД: Простая схема без подписанных дорожек.
-ВЫВОД:
-Шаг
-1. Запуск двигателя
-2. Прогрев
-3. Начало движения
-</example_2_simple_flowchart>
-
-### ТВОЯ ЗАДАЧА:
-Проанализируй загруженную картинку.
-Если ты видишь горизонтальные или вертикальные полосы с именами (роли) — используй формат с колонкой "Роль".
-Если полос нет — используй простой нумерованный список.
-
-Выведи ТОЛЬКО результат. Никаких вступлений, никаких рассуждений."""
+Выведи только результат. Без вступлений. Первый шаг = точный текст первой фигуры."""
 
 _BACKEND: Optional[str] = None
 
@@ -400,7 +383,7 @@ def _extract_llama_cpp(
     llm = _get_llama_cpp_vlm(use_gpu, model_path, mmproj_path, n_ctx)
     data_uri = _to_data_uri(image_path)
     messages = [
-        {"role": "system", "content": "Извлекаешь алгоритм с диаграммы: один раз обходи фигуры по стрелкам, выводи только нумерованный список. Текст шага — дословно из подписи в фигуре. Дорожки с подписями есть → формат «Шаг | Роль», роли с диаграммы. Дорожек нет → только «Шаг» и «1. Текст» без ролей. Без повторов и без придуманного текста. Ответ на русском."},
+        {"role": "system", "content": "Ты — OCR для диаграмм. Читай только текст ВНУТРИ фигур, дословно. Не придумывай шагов. Подписи Да/Нет на стрелках — не дорожки; для таких диаграмм выводи только «Шаг» и нумерованный список «1. …», «2. …» без «|». Формат «Шаг | Роль» — только при явных дорожках с именами ролей. После ромба — обе ветки. Только результат."},
         {
             "role": "user",
             "content": [
@@ -413,8 +396,8 @@ def _extract_llama_cpp(
         response = llm.create_chat_completion(
             messages=messages,
             max_tokens=max_tokens,
-            temperature=0.1,
-            repeat_penalty=1.15,
+            temperature=0.0,
+            repeat_penalty=1.1,
         )
     return response["choices"][0]["message"]["content"].strip()
 
@@ -432,7 +415,7 @@ def _extract_transformers(
     messages = [
         {
             "role": "system",
-            "content": "Извлекаешь алгоритм с диаграммы: один раз обходи фигуры по стрелкам, выводи только нумерованный список. Текст шага — дословно из подписи в фигуре. Дорожки с подписями есть → формат «Шаг | Роль», роли с диаграммы. Дорожек нет → только «Шаг» и «1. Текст» без ролей. Без повторов и без придуманного текста. Ответ на русском.",
+            "content": "Ты — OCR для диаграмм. Читай только текст ВНУТРИ фигур, дословно. Не придумывай шагов. Подписи Да/Нет на стрелках — не дорожки; для таких диаграмм выводи только «Шаг» и нумерованный список «1. …», «2. …» без «|». Формат «Шаг | Роль» — только при явных дорожках с именами ролей. После ромба — обе ветки. Только результат.",
         },
         {
             "role": "user",
@@ -469,6 +452,17 @@ def _extract_transformers(
         clean_up_tokenization_spaces=False,
     )
     return output_text[0].strip()
+
+
+def _is_hallucinated_generic(text: str) -> bool:
+    """Detect generic BPMN hallucination (Создание заявки, Проверка бюджета, Утверждение)."""
+    t = text.lower()
+    return (
+        "создание заявки" in t
+        and "проверка бюджета" in t
+        and "утверждение" in t
+        and t.count("|") >= 3  # role column present
+    )
 
 
 def extract_algorithm(
@@ -610,34 +604,38 @@ def extract_algorithm(
         )
 
     # Растровое изображение — препроцессинг и VLM
-    pre_start = time.perf_counter()
-    preprocessed_path = preprocess_for_vlm(path, enabled=use_preprocessing)
-    preprocess_time += time.perf_counter() - pre_start
+    def _run_vlm(preproc: bool) -> str:
+        pre_start = time.perf_counter()
+        p = preprocess_for_vlm(path, enabled=preproc)
+        nonlocal preprocess_time
+        preprocess_time += time.perf_counter() - pre_start
+        try:
+            backend = _detect_backend()
+            if backend == "llama_cpp":
+                resolved_model, resolved_mmproj = _resolve_llama_paths(
+                    Path(model_path) if model_path else None,
+                    Path(mmproj_path) if mmproj_path else None,
+                )
+                infer_start = time.perf_counter()
+                r = _extract_llama_cpp(p, resolved_model, resolved_mmproj, use_gpu, max_tokens, n_ctx)
+                nonlocal inference_time
+                inference_time += time.perf_counter() - infer_start
+            else:
+                infer_start = time.perf_counter()
+                r = _extract_transformers(p, use_gpu, max_tokens)
+                inference_time += time.perf_counter() - infer_start
+            return r
+        finally:
+            if p != path and p.exists():
+                p.unlink(missing_ok=True)
+
     try:
-        backend = _detect_backend()
-        if backend == "llama_cpp":
-            resolved_model, resolved_mmproj = _resolve_llama_paths(
-                Path(model_path) if model_path else None,
-                Path(mmproj_path) if mmproj_path else None,
-            )
-            infer_start = time.perf_counter()
-            result = _extract_llama_cpp(
-                preprocessed_path,
-                resolved_model,
-                resolved_mmproj,
-                use_gpu,
-                max_tokens,
-                n_ctx,
-            )
-            inference_time += time.perf_counter() - infer_start
-        else:
-            infer_start = time.perf_counter()
-            result = _extract_transformers(preprocessed_path, use_gpu, max_tokens)
-            inference_time += time.perf_counter() - infer_start
+        result = _run_vlm(use_preprocessing)
+        if use_preprocessing and _is_hallucinated_generic(result):
+            logger.info("Retrying extract without preprocessing (hallucination detected)")
+            result = _run_vlm(False)
         return result
     finally:
-        if preprocessed_path != path and preprocessed_path.exists():
-            preprocessed_path.unlink(missing_ok=True)
         if log_timings:
             total = time.perf_counter() - total_start
             print(

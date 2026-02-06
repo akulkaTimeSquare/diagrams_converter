@@ -331,7 +331,17 @@ print(plantuml_source)
 
 # Тест извлечения из изображения через VLM (загрузка модели ~6 GB)
 .venv\Scripts\python.exe tests\test_qwen_integration.py
+
+# Тест extract API на эталонах из test/test.txt (API должен быть запущен)
+.venv\Scripts\python.exe scripts\run_extract_tests.py --api-url http://localhost:8000 --max-tokens 1024
+
+# Без препроцессинга (иногда даёт лучший результат для части диаграмм)
+.venv\Scripts\python.exe scripts\run_extract_tests.py --api-url http://localhost:8000 --max-tokens 1024 --no-preprocess
 ```
+
+**Важно:** после изменения промпта в `src/diagram_extractor.py` перезапустите API (при Docker: `docker compose up -d --build`).
+
+**Повтор при галлюцинации:** если VLM выдаёт шаблонные шаги («Создание заявки», «Проверка бюджета», «Утверждение») вместо текста с диаграммы, извлечение автоматически повторяется без препроцессинга.
 
 ---
 

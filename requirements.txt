@@ -19,6 +19,7 @@ cairosvg>=2.7.0
 plantuml>=0.3.0
 
 # REST API
+requests>=2.28.0
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 python-multipart>=0.0.9
