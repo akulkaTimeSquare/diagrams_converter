@@ -13,8 +13,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import Response
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import HTMLResponse, Response
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from src.diagram_extractor import ensure_vlm_loaded, extract_algorithm, get_backend
@@ -73,6 +75,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+app.mount(
+    "/static",
+    StaticFiles(directory=str(BASE_DIR / "static")),
+    name="static",
+)
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def ui_home(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+
 
 class GenerateDiagramRequest(BaseModel):
     """Тело запроса для генерации диаграммы из текста алгоритма."""
@@ -89,8 +106,8 @@ class GenerateDiagramRequest(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-@app.get("/")
-async def root():
+@app.get("/api")
+async def api_root():
     """Корень API: ссылки на документацию."""
     return {
         "service": "Diagram Algorithm Extraction API",
