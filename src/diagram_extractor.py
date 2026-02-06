@@ -17,7 +17,7 @@ _VLM_LOCK = threading.Lock()
 # По умолчанию q8_0; q4_k_m — экономия RAM
 _LLAMA_QUANT_OPTIONS = (
     "q4_0", "q4_k_s", "q4_k_m", "q5_k_m", "q8_0",
-    "f16-q8_0", "bf16-q8_0", 
+    "f16-q8_0", "bf16-q8_0", "bf16",  # bf16 — полная точность без квантизации
 )
 _DEFAULT_LLAMA_MMPROJ = "Qwen2.5-VL-3B-Instruct-mmproj-f16.gguf"
 
@@ -27,7 +27,9 @@ def _get_llama_quant() -> str:
     q = os.environ.get("LLAMA_QUANT", "q8_0").strip()
     if q in _LLAMA_QUANT_OPTIONS:
         return q
-    if q.lower() in ("f16-q8_0", "bf16-q8_0"):
+    if q.lower() in ("f16-q8_0", "bf16-q8_0", "bf16"):
+        if q.lower() == "bf16":
+            return "bf16"
         return "f16-q8_0" if "f16" in q.lower() else "bf16-q8_0"
     return "q8_0"
 
@@ -35,24 +37,57 @@ def _get_llama_quant() -> str:
 def _default_llama_model_filename() -> str:
     return f"Qwen2.5-VL-3B-Instruct-{_get_llama_quant()}.gguf"
 
-# Промпт для извлечения алгоритма (формат: Шаг + нумерованный список или Шаг | Роль)
-DIAGRAM_PROMPT = """Извлеки алгоритм из этой диаграммы. Обойди фигуры по стрелкам от начала до конца. Читай и копируй текст только из ВНУТРЕННОСТИ фигур (прямоугольник, ромб, круг) ДОСЛОВНО — каждую букву как на изображении (например: «резюме», «гибкую работу», «Договориться», «учебы»/«учебе»/«учеба»).
+# Промпт для извлечения алгоритма в формате, совпадающем с test.txt
+DIAGRAM_PROMPT = """Обязательно: всегда выдавай ответ. Пустой вывод не допускается.
 
-Правила:
-— Шаг = только то, что написано ВНУТРИ какой-то фигуры. Не придумывай шагов (никаких «Таймер: X», «Завершено: X», «Найти работу» вместо «Искать гибкую работу», если так не написано в фигуре).
-— Включай ВСЕ узлы: прямоугольники, ромбы, круги (конечные). Каждая фигура = ровно один шаг.
-— После ромба решения обойди ОБЕ ветки: сначала одну до конца (до круга/конца), потом вторую. Все конечные узлы должны войти в список.
-— Текст шага = точная надпись в фигуре. Не перефразируй (не «Договорюсь», а как написано — «Договориться»).
-— Подписи на СТРЕЛКАХ (Да, Нет) — не шаги, не включать. Они не являются дорожками/ролями.
-— Если в диаграмме есть префиксы в фигурах — сохраняй: Событие:, Таймер:, Действие:, Завершено:
-— Ромбы решений — как шаги: «N. Текст вопроса?» (дословно из ромба).
-— Дубли нумерации (два «4.») — оставить.
+Задача (как в README): извлечь из диаграммы текст алгоритма/процесса. Ответ — только на русском.
 
-Формат вывода — строго ОДИН из двух:
-А) Есть настоящие дорожки (swimlanes — отдельные полосы/дорожки с подписанными ролями, например «Студент», «Деканат»): первая строка «Шаг | Роль», далее «Текст шага | Название дорожки». Не считай дорожками подписи Да/Нет на стрелках — для таких диаграмм используй формат Б.
-Б) Нет дорожек ИЛИ только подписи Да/Нет на стрелках: первая строка только «Шаг». Далее — нумерованный список: «1. Текст», «2. Текст», … Без символа «|», без второй колонки.
+Верни ТОЛЬКО один из двух форматов (без markdown, без пояснений, без вступлений):
 
-Выведи только результат. Без вступлений. Первый шаг = точный текст первой фигуры."""
+1) Если на диаграмме есть дорожки (swimlanes) с подписями ролей:
+Шаг | Роль
+1. <дословная подпись внутри фигуры> | <дословная подпись дорожки>
+2. ...
+
+2) Если дорожек нет:
+Шаг
+1. <дословная подпись внутри фигуры>
+2. ...
+
+Правила (анти-галлюцинации):
+- Пиши только то, что НАПИСАНО на диаграмме (в фигурах и на дорожках). Никаких фактов/шагов/ролей “по смыслу”.
+- Текст шага — дословно из подписи фигуры (прямоугольник/ромб/событие с подписью). Не используй шаблоны/скобки вроде [Инициализация], [Выбор], и не перефразируй.
+- Роль у шага — только подпись дорожки. Если дорожек нет — колонку «Роль» не выводи вообще.
+- Формат должен быть консистентным: если заголовок «Шаг | Роль» — то КАЖДАЯ строка шага обязана содержать « | <роль>». Если дорожек нет — никакого символа «|» в ответе быть не должно.
+- Стрелки/связи: перечисляй узлы по направлению процесса (как идут стрелки). При ветвлении: сначала одна ветка до конца, затем другая, затем общее продолжение.
+- Конечные события без подписи не выводи как шаг.
+- Если подпись не читается — напиши НЕРАЗБОРЧИВО (не придумывай).
+
+Если на изображении нет пошагового процесса (не BPMN/flowchart) — тогда вместо форматов выше:
+Описание
+<кратко перечисли, что видно на изображении, без выдуманных деталей>"""
+
+# Резервный сверх-строгий промпт: используется при нарушении формата/сильной галлюцинации.
+STRICT_DIAGRAM_PROMPT = """Верни ответ строго в одном из форматов ниже. Никаких других заголовков/фраз.
+
+Формат A (есть swimlanes):
+Шаг | Роль
+1. <подпись фигуры> | <подпись дорожки>
+2. ...
+
+Формат B (swimlanes нет):
+Шаг
+1. <подпись фигуры>
+2. ...
+
+Формат C (это не процесс):
+Описание
+<кратко что видно>
+
+Самопроверка перед ответом:
+- Первая строка должна быть РОВНО: «Шаг», «Шаг | Роль» или «Описание».
+- Если выбрал «Шаг | Роль» — в каждой строке шагов должен быть символ «|» и роль.
+- Если текста не видно — «НЕРАЗБОРЧИВО» (не придумывай)."""
 
 _BACKEND: Optional[str] = None
 
@@ -378,17 +413,21 @@ def _extract_llama_cpp(
     use_gpu: bool,
     max_tokens: int,
     n_ctx: int,
+    diagram_prompt: str = DIAGRAM_PROMPT,
 ) -> str:
     """Extract using cached llama-cpp-python + Qwen25VLChatHandler."""
     llm = _get_llama_cpp_vlm(use_gpu, model_path, mmproj_path, n_ctx)
     data_uri = _to_data_uri(image_path)
     messages = [
-        {"role": "system", "content": "Ты — OCR для диаграмм. Читай только текст ВНУТРИ фигур, дословно. Не придумывай шагов. Подписи Да/Нет на стрелках — не дорожки; для таких диаграмм выводи только «Шаг» и нумерованный список «1. …», «2. …» без «|». Формат «Шаг | Роль» — только при явных дорожках с именами ролей. После ромба — обе ветки. Только результат."},
+        {
+            "role": "system",
+            "content": "Ты извлекаешь из диаграмм ТОЛЬКО текст алгоритма/процесса. Строго следуй формату из инструкции пользователя. Запрещено придумывать шаги/роли/факты, писать вступления/описания перед списком, или заменять подписи шаблонами. Если текст не читается — пиши «НЕРАЗБОРЧИВО». Ответ на русском. Пустой ответ запрещён.",
+        },
         {
             "role": "user",
             "content": [
                 {"type": "image_url", "image_url": {"url": data_uri}},
-                {"type": "text", "text": DIAGRAM_PROMPT},
+                {"type": "text", "text": diagram_prompt},
             ],
         },
     ]
@@ -406,6 +445,7 @@ def _extract_transformers(
     image_path: Path,
     use_gpu: bool,
     max_tokens: int,
+    diagram_prompt: str = DIAGRAM_PROMPT,
 ) -> str:
     """Extract using cached Hugging Face Transformers + Qwen2.5-VL."""
     from qwen_vl_utils import process_vision_info
@@ -415,13 +455,13 @@ def _extract_transformers(
     messages = [
         {
             "role": "system",
-            "content": "Ты — OCR для диаграмм. Читай только текст ВНУТРИ фигур, дословно. Не придумывай шагов. Подписи Да/Нет на стрелках — не дорожки; для таких диаграмм выводи только «Шаг» и нумерованный список «1. …», «2. …» без «|». Формат «Шаг | Роль» — только при явных дорожках с именами ролей. После ромба — обе ветки. Только результат.",
+            "content": "Ты извлекаешь из диаграмм ТОЛЬКО текст алгоритма/процесса. Строго следуй формату из инструкции пользователя. Запрещено придумывать шаги/роли/факты, писать вступления/описания перед списком, или заменять подписи шаблонами. Если текст не читается — пиши «НЕРАЗБОРЧИВО». Ответ на русском. Пустой ответ запрещён.",
         },
         {
             "role": "user",
             "content": [
                 {"type": "image", "image": image_path_str},
-                {"type": "text", "text": DIAGRAM_PROMPT},
+                {"type": "text", "text": diagram_prompt},
             ],
         },
     ]
@@ -463,6 +503,120 @@ def _is_hallucinated_generic(text: str) -> bool:
         and "утверждение" in t
         and t.count("|") >= 3  # role column present
     )
+
+
+def _strip_description_intro(text: str) -> str:
+    """Убрать ведущий абзац «Описание: ...» / «Диаграмма BPMN ...», если дальше идёт список шагов."""
+    if not text or "шаг" not in text.lower():
+        return text
+    lines = text.split("\n")
+    start_idx = 0
+    for i, line in enumerate(lines):
+        s = line.strip().lower()
+        if s.startswith("шаг") or (s and s[0].isdigit() and ("." in s[:4] or ")" in s[:4])):
+            start_idx = i
+            break
+        if s.startswith("описание") or "диаграмма bpmn" in s or "процессный бизнес" in s:
+            continue
+        if s and not s.startswith("описание"):
+            start_idx = i
+            break
+    if start_idx > 0:
+        return "\n".join(lines[start_idx:]).strip()
+    return text
+
+
+def _normalize_extracted_text(text: str) -> str:
+    """
+    Normalize common VLM output glitches while preserving content:
+    - Drop empty line after header
+    - Enforce header/column consistency ("Шаг" vs "Шаг | Роль")
+    - If header has role column but no step lines have roles -> downgrade to "Шаг"
+    - If header is "Шаг" but steps contain " | " -> keep only step text (left side)
+    """
+    if not text:
+        return text
+    raw_lines = [ln.rstrip() for ln in text.strip().split("\n")]
+    if not raw_lines:
+        return text
+
+    # Preserve "Описание" mode as-is (only strip trailing spaces)
+    first_nonempty_idx = next((i for i, ln in enumerate(raw_lines) if ln.strip()), None)
+    if first_nonempty_idx is None:
+        return text.strip()
+    first = raw_lines[first_nonempty_idx].strip()
+    if first.lower().startswith("описание"):
+        return "\n".join(raw_lines).strip()
+
+    # Find header line (expect "Шаг" or "Шаг | Роль")
+    header_idx = first_nonempty_idx
+    header = raw_lines[header_idx].strip()
+    header_low = header.lower().replace("\t", " ")
+    if not header_low.startswith("шаг"):
+        # Unknown header; still remove empty lines at the top
+        return "\n".join(raw_lines[header_idx:]).strip()
+
+    # Remove single empty line right after header
+    lines = raw_lines[:]
+    if header_idx + 1 < len(lines) and not lines[header_idx + 1].strip():
+        lines.pop(header_idx + 1)
+
+    header = lines[header_idx].strip()
+    has_role_header = "|" in header and "роль" in header.lower()
+
+    # Collect step lines (after header)
+    step_lines = lines[header_idx + 1 :]
+    step_lines_stripped = [ln.strip() for ln in step_lines if ln.strip()]
+    step_lines_have_roles = any(" | " in ln for ln in step_lines_stripped)
+
+    if has_role_header and not step_lines_have_roles:
+        # Header says roles, but body doesn't -> downgrade header.
+        lines[header_idx] = "Шаг"
+        return "\n".join(lines[header_idx:]).strip()
+
+    if (not has_role_header) and step_lines_have_roles:
+        # Body has roles, but header doesn't -> drop role column to keep deterministic format.
+        new_step_lines = []
+        for ln in step_lines:
+            if " | " in ln:
+                new_step_lines.append(ln.split(" | ", 1)[0].rstrip())
+            else:
+                new_step_lines.append(ln)
+        lines = lines[: header_idx + 1] + new_step_lines
+        lines[header_idx] = "Шаг"
+        return "\n".join(lines[header_idx:]).strip()
+
+    return "\n".join(lines[header_idx:]).strip()
+
+
+def _is_invalid_extracted_format(text: str) -> bool:
+    """Return True if output violates required header/column rules."""
+    if not text:
+        return True
+    lines = [ln.strip() for ln in text.split("\n")]
+    lines = [ln for ln in lines if ln]
+    if not lines:
+        return True
+    header = lines[0]
+    h = header.lower()
+    if h == "описание":
+        return False
+    if not h.startswith("шаг"):
+        return True
+
+    has_role_header = ("|" in header) and ("роль" in h)
+    step_lines = lines[1:]
+    numbered = [ln for ln in step_lines if ln and ln[0].isdigit()]
+    if not numbered:
+        # empty list isn't useful (but prompt says never empty) -> treat as invalid to trigger retry
+        return True
+
+    if has_role_header:
+        # every numbered line must have a role column
+        return any(" | " not in ln for ln in numbered)
+
+    # no role header: must not contain role column in steps
+    return any(" | " in ln for ln in numbered)
 
 
 def extract_algorithm(
@@ -604,7 +758,7 @@ def extract_algorithm(
         )
 
     # Растровое изображение — препроцессинг и VLM
-    def _run_vlm(preproc: bool) -> str:
+    def _run_vlm(preproc: bool, diagram_prompt: str) -> str:
         pre_start = time.perf_counter()
         p = preprocess_for_vlm(path, enabled=preproc)
         nonlocal preprocess_time
@@ -617,12 +771,20 @@ def extract_algorithm(
                     Path(mmproj_path) if mmproj_path else None,
                 )
                 infer_start = time.perf_counter()
-                r = _extract_llama_cpp(p, resolved_model, resolved_mmproj, use_gpu, max_tokens, n_ctx)
+                r = _extract_llama_cpp(
+                    p,
+                    resolved_model,
+                    resolved_mmproj,
+                    use_gpu,
+                    max_tokens,
+                    n_ctx,
+                    diagram_prompt=diagram_prompt,
+                )
                 nonlocal inference_time
                 inference_time += time.perf_counter() - infer_start
             else:
                 infer_start = time.perf_counter()
-                r = _extract_transformers(p, use_gpu, max_tokens)
+                r = _extract_transformers(p, use_gpu, max_tokens, diagram_prompt=diagram_prompt)
                 inference_time += time.perf_counter() - infer_start
             return r
         finally:
@@ -630,11 +792,23 @@ def extract_algorithm(
                 p.unlink(missing_ok=True)
 
     try:
-        result = _run_vlm(use_preprocessing)
+        result = _run_vlm(use_preprocessing, DIAGRAM_PROMPT)
         if use_preprocessing and _is_hallucinated_generic(result):
             logger.info("Retrying extract without preprocessing (hallucination detected)")
-            result = _run_vlm(False)
-        return result
+            result = _run_vlm(False, DIAGRAM_PROMPT)
+
+        normalized = _normalize_extracted_text(_strip_description_intro(result))
+        if _is_invalid_extracted_format(normalized):
+            logger.info("Retrying extract with STRICT_DIAGRAM_PROMPT (format violation)")
+            result2 = _run_vlm(use_preprocessing, STRICT_DIAGRAM_PROMPT)
+            if use_preprocessing and _is_hallucinated_generic(result2):
+                logger.info("Retrying strict extract without preprocessing (hallucination detected)")
+                result2 = _run_vlm(False, STRICT_DIAGRAM_PROMPT)
+            normalized2 = _normalize_extracted_text(_strip_description_intro(result2))
+            if not _is_invalid_extracted_format(normalized2):
+                normalized = normalized2
+
+        return normalized
     finally:
         if log_timings:
             total = time.perf_counter() - total_start

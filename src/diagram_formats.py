@@ -249,19 +249,50 @@ def parse_drawio(path: Path) -> str | None:
     return "\n".join(lines)
 
 
-def convert_svg_to_png(svg_path: Path) -> Path:
-    """Конвертировать SVG в PNG во временный файл."""
-    try:
-        import cairosvg
-    except ImportError:
-        raise ImportError("Для чтения .svg установите: pip install cairosvg")
+def _convert_svg_cairosvg(svg_path: Path, png_path: Path) -> None:
+    """Конвертировать SVG в PNG через cairosvg (требует системную библиотеку Cairo)."""
+    import cairosvg
+    cairosvg.convert_file(url=str(svg_path.resolve()), write_to=str(png_path))
 
+
+def _convert_svg_resvg(svg_path: Path, png_path: Path) -> None:
+    """Конвертировать SVG в PNG через resvg_py (работает на Windows без Cairo)."""
+    import resvg_py
+    svg_bytes = svg_path.read_bytes()
+    svg_str = svg_bytes.decode("utf-8", errors="replace")
+    png_bytes = resvg_py.svg_to_bytes(svg_string=svg_str)
+    png_path.write_bytes(png_bytes)
+
+
+def convert_svg_to_png(svg_path: Path) -> Path:
+    """Конвертировать SVG в PNG во временный файл.
+    Сначала пробует cairosvg; при отсутствии Cairo (например на Windows) — resvg_py."""
     fd, png_path = tempfile.mkstemp(suffix=".png")
     import os
     os.close(fd)
     png_path = Path(png_path)
-    cairosvg.convert_file(url=str(svg_path.resolve()), write_to=str(png_path))
-    return png_path
+    # 1) cairosvg (на Linux часто уже есть Cairo)
+    try:
+        _convert_svg_cairosvg(svg_path, png_path)
+        return png_path
+    except ImportError:
+        pass
+    except (OSError, Exception) as e:
+        err_msg = str(e).lower()
+        if "cairo" in err_msg or "libcairo" in err_msg or "cannot load library" in err_msg:
+            pass  # Cairo не найден — пробуем resvg
+        else:
+            raise
+    # 2) resvg_py (Windows/все ОС без системного Cairo)
+    try:
+        _convert_svg_resvg(svg_path, png_path)
+        return png_path
+    except ImportError:
+        raise ImportError(
+            "Для конвертации .svg в PNG установите один из вариантов:\n"
+            "  pip install cairosvg   (нужна системная библиотека Cairo)\n"
+            "  pip install resvg-py    (работает на Windows без Cairo)"
+        )
 
 
 def render_plantuml_to_png(path: Path) -> Path | None:

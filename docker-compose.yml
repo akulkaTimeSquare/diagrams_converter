@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile.llamacpp
       args:
-        # Квантизация модели (должна совпадать с LLAMA_QUANT при запуске)
+        # Квантизация q8_0 (меньше VRAM)
         LLAMA_QUANT: q8_0
     image: diagrams-converter-llamacpp:latest
     container_name: diagrams-converter

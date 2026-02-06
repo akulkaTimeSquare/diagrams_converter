@@ -17,7 +17,7 @@ REPO_ID = "Mungert/Qwen2.5-VL-3B-Instruct-GGUF"
 MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
 MMPROJ_FILENAME = "Qwen2.5-VL-3B-Instruct-mmproj-f16.gguf"
 
-# Доступные квантизации (размер ~2 GB q4_k_m … ~4 GB q8_0 / f16-q8_0; в 7GB VRAM укладывается f16-q8_0)
+# Доступные квантизации и полная точность (bf16 — без квантизации, ~6.2 GB, лучшее качество)
 QUANT_FILENAMES = {
     "q4_0": "Qwen2.5-VL-3B-Instruct-q4_0.gguf",
     "q4_k_s": "Qwen2.5-VL-3B-Instruct-q4_k_s.gguf",
@@ -26,6 +26,7 @@ QUANT_FILENAMES = {
     "q8_0": "Qwen2.5-VL-3B-Instruct-q8_0.gguf",
     "f16-q8_0": "Qwen2.5-VL-3B-Instruct-f16-q8_0.gguf",
     "bf16-q8_0": "Qwen2.5-VL-3B-Instruct-bf16-q8_0.gguf",
+    "bf16": "Qwen2.5-VL-3B-Instruct-bf16.gguf",  # полная точность, без квантизации
 }
 
 
@@ -35,7 +36,7 @@ def main() -> None:
         "--quant",
         default="q8_0",
         choices=list(QUANT_FILENAMES),
-        help="Квантизация (q8_0 по умолчанию; q4_k_m — экономия RAM)",
+        help="Квантизация или bf16 (полная точность, без квантизации); q4_k_m — экономия RAM",
     )
     args = parser.parse_args()
     llm_filename = QUANT_FILENAMES[args.quant]

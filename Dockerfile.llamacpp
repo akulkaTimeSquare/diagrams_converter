@@ -26,7 +26,7 @@ RUN pip install --no-cache-dir llama-cpp-python \
 
 COPY . /app
 
-# Скачать модель на этапе сборки, чтобы при запуске контейнера не ждать загрузки
+# Скачать модель на этапе сборки (q8_0 — квантизация, меньше VRAM)
 ARG LLAMA_QUANT=q8_0
 RUN python3 scripts/download_models.py --quant ${LLAMA_QUANT}
 

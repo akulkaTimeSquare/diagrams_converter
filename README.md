@@ -144,7 +144,7 @@ docker build -f Dockerfile.llamacpp -t diagrams-converter-llamacpp .
 docker run -d -p 8000:8000 -e USE_GPU=true --gpus all diagrams-converter-llamacpp
 ```
 
-Требуется: Docker, NVIDIA Container Toolkit, видеокарта NVIDIA. `Dockerfile.llamacpp` устанавливает llama-cpp-python с CUDA 12.4 (wheel cu124). **CUDA 13 драйвер** поддерживает контейнер с CUDA 12.4 (обратная совместимость).
+Требуется: Docker, NVIDIA Container Toolkit, видеокарта NVIDIA. `Dockerfile.llamacpp` устанавливает llama-cpp-python с CUDA 12.4 (wheel cu124). **CUDA 13 драйвер** поддерживает контейнер с CUDA 12.4 (обратная совместимость). По умолчанию в Docker используется модель **bf16** (полная точность без квантизации, ~6.2 GB VRAM) для лучшего качества.
 
 **Timing logs:**
 The service prints timing lines to stdout:
@@ -461,9 +461,9 @@ Note: this only affects text generation (/generate-diagram). /extract still uses
 
 - `LLAMA_MODEL_PATH` — путь к файлу GGUF модели.
 - `LLAMA_MMPROJ_PATH` — путь к файлу mmproj.
-- `LLAMA_QUANT` — квантизация при автозагрузке с HF (по умолчанию `q8_0`; варианты: `q4_0`, `q4_k_s`, `q4_k_m`, `q5_k_m`, `q8_0`, `f16-q8_0`, `bf16-q8_0`).
+- `LLAMA_QUANT` — квантизация при автозагрузке с HF (по умолчанию `q8_0`; варианты: `q4_0`, `q4_k_s`, `q4_k_m`, `q5_k_m`, `q8_0`, `f16-q8_0`, `bf16-q8_0`, **`bf16`** — полная точность без квантизации).
 
-Если в `models/` лежат файлы с именами по умолчанию (q8_0 и mmproj-f16), они подхватываются автоматически.
+Если в `models/` лежат файлы с именами по умолчанию (q8_0/bf16 и mmproj-f16), они подхватываются автоматически.
 
 #### 3. Проверка бэкенда
 
