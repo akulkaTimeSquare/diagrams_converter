@@ -5,3 +5,38 @@
 body {
   font-family: "Manrope", "Noto Sans", sans-serif;
 }
+
+.progress-track {
+  position: relative;
+  overflow: hidden;
+  height: 6px;
+  border-radius: 9999px;
+  background: #e2e8f0;
+}
+
+.progress-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #3b82f6, #22c55e, #3b82f6);
+  transform: translateX(-100%);
+}
+
+.progress-bar[data-state="loading"] {
+  width: 40%;
+  animation: progress-slide 1.2s ease-in-out infinite;
+}
+
+.progress-bar[data-state="done"] {
+  width: 100%;
+  transform: translateX(0);
+  animation: none;
+}
+
+@keyframes progress-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
+}

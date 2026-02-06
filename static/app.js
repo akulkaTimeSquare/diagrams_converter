@@ -20,11 +20,16 @@
   const extractMeta = byId("extractMeta");
   const copyAlgorithm = byId("copyAlgorithm");
   const sendToGenerate = byId("sendToGenerate");
+  const extractProgress = byId("extractProgress");
+  const extractProgressBar = byId("extractProgressBar");
+  const extractStage = byId("extractStage");
+  const extractTiming = byId("extractTiming");
 
   const generateForm = byId("generateForm");
   const generateText = byId("generateText");
   const generateFormat = byId("generateFormat");
   const generateMaxTokens = byId("generateMaxTokens");
+  const generateUseGpu = byId("generateUseGpu");
   const generateDownload = byId("generateDownload");
   const generateBtn = byId("generateBtn");
   const generateSpinner = byId("generateSpinner");
@@ -33,6 +38,10 @@
   const plantumlResult = byId("plantumlResult");
   const renderNote = byId("renderNote");
   const downloadLink = byId("downloadLink");
+  const generateProgress = byId("generateProgress");
+  const generateProgressBar = byId("generateProgressBar");
+  const generateStage = byId("generateStage");
+  const generateTiming = byId("generateTiming");
 
   let currentBlobUrl = null;
 
@@ -73,6 +82,28 @@
     generateSpinner.classList.toggle("hidden", !busy);
   };
 
+  const formatSeconds = (ms) => `${(ms / 1000).toFixed(2)}s`;
+
+  const formatTimings = (waitMs, bodyMs, totalMs) =>
+    `wait ${formatSeconds(waitMs)} | parse ${formatSeconds(bodyMs)} | total ${formatSeconds(totalMs)}`;
+
+  const startProgress = (container, bar, stageEl, timingEl, stageText) => {
+    container.classList.remove("hidden");
+    bar.dataset.state = "loading";
+    stageEl.textContent = stageText;
+    timingEl.textContent = "";
+  };
+
+  const updateStage = (stageEl, stageText) => {
+    stageEl.textContent = stageText;
+  };
+
+  const finishProgress = (bar, stageEl, timingEl, stageText, timingText) => {
+    bar.dataset.state = "done";
+    stageEl.textContent = stageText;
+    timingEl.textContent = timingText;
+  };
+
   const resetGenerateOutput = () => {
     if (currentBlobUrl) {
       URL.revokeObjectURL(currentBlobUrl);
@@ -89,15 +120,24 @@
   tabExtract.addEventListener("click", () => setTab("extract"));
   tabGenerate.addEventListener("click", () => setTab("generate"));
 
+  const syncGenerateDownloadState = () => {
+    const isPng = generateFormat.value === "png";
+    generateDownload.disabled = !isPng;
+    if (!isPng) {
+      generateDownload.checked = false;
+    }
+  };
+
   extractForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!extractFile.files || extractFile.files.length === 0) {
-      showToast("Please select a PNG or JPG file.");
+      showToast("Please select a diagram file.");
       return;
     }
 
     setExtractBusy(true);
     extractMeta.textContent = "";
+    startProgress(extractProgress, extractProgressBar, extractStage, extractTiming, "Uploading file...");
 
     const formData = new FormData();
     formData.append("file", extractFile.files[0]);
@@ -105,25 +145,54 @@
     formData.append("max_tokens", extractMaxTokens.value || "256");
     formData.append("use_gpu", extractUseGpu.checked ? "true" : "false");
 
+    const t0 = performance.now();
+    let tHeaders = t0;
+    let tBody = t0;
     try {
       const resp = await fetch("/extract", {
         method: "POST",
         body: formData,
       });
+      tHeaders = performance.now();
+      updateStage(extractStage, "Processing response...");
 
       if (!resp.ok) {
         const errText = await resp.text();
+        tBody = performance.now();
         showToast(`Extract failed (${resp.status}).`);
         extractMeta.textContent = errText.slice(0, 120);
+        finishProgress(
+          extractProgressBar,
+          extractStage,
+          extractTiming,
+          "Failed",
+          formatTimings(tHeaders - t0, tBody - tHeaders, tBody - t0)
+        );
         return;
       }
 
       const data = await resp.json();
+      tBody = performance.now();
       extractResult.value = data.algorithm || "";
       extractMeta.textContent = data.filename ? `File: ${data.filename}` : "Done";
+      finishProgress(
+        extractProgressBar,
+        extractStage,
+        extractTiming,
+        "Done",
+        formatTimings(tHeaders - t0, tBody - tHeaders, tBody - t0)
+      );
       showToast("Extract completed.", "success");
     } catch (err) {
+      tBody = performance.now();
       showToast("Network error during extract.");
+      finishProgress(
+        extractProgressBar,
+        extractStage,
+        extractTiming,
+        "Failed",
+        `total ${formatSeconds(tBody - t0)}`
+      );
     } finally {
       setExtractBusy(false);
     }
@@ -151,13 +220,7 @@
     setTab("generate");
   });
 
-  generateFormat.addEventListener("change", () => {
-    const isPng = generateFormat.value === "png";
-    generateDownload.disabled = !isPng;
-    if (!isPng) {
-      generateDownload.checked = false;
-    }
-  });
+  generateFormat.addEventListener("change", syncGenerateDownloadState);
 
   generateForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -170,33 +233,49 @@
     resetGenerateOutput();
     setGenerateBusy(true);
     generateMeta.textContent = "";
+    startProgress(generateProgress, generateProgressBar, generateStage, generateTiming, "Sending request...");
 
     const payload = {
       algorithm_text: text,
       format: generateFormat.value,
       max_tokens: Number(generateMaxTokens.value || 256),
+      use_gpu: generateUseGpu.checked,
     };
 
     const wantsDownload = generateDownload.checked && generateFormat.value === "png";
     const url = wantsDownload ? "/generate-diagram?download=true" : "/generate-diagram";
 
+    const t0 = performance.now();
+    let tHeaders = t0;
+    let tBody = t0;
     try {
       const resp = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      tHeaders = performance.now();
+      updateStage(generateStage, "Processing response...");
 
       const contentType = resp.headers.get("content-type") || "";
       if (!resp.ok) {
         const errText = await resp.text();
+        tBody = performance.now();
         showToast(`Generate failed (${resp.status}).`);
         generateMeta.textContent = errText.slice(0, 160);
+        finishProgress(
+          generateProgressBar,
+          generateStage,
+          generateTiming,
+          "Failed",
+          formatTimings(tHeaders - t0, tBody - tHeaders, tBody - t0)
+        );
         return;
       }
 
       if (contentType.includes("image/png")) {
         const blob = await resp.blob();
+        tBody = performance.now();
         currentBlobUrl = URL.createObjectURL(blob);
         pngPreview.src = currentBlobUrl;
         pngPreview.classList.remove("hidden");
@@ -204,11 +283,19 @@
         downloadLink.download = "diagram.png";
         downloadLink.classList.remove("hidden");
         downloadLink.click();
+        finishProgress(
+          generateProgressBar,
+          generateStage,
+          generateTiming,
+          "Done",
+          formatTimings(tHeaders - t0, tBody - tHeaders, tBody - t0)
+        );
         showToast("PNG generated.", "success");
         return;
       }
 
       const data = await resp.json();
+      tBody = performance.now();
       const plantuml = data.plantuml || data.diagram || data.plantuml_source;
       if (plantuml) {
         plantumlResult.textContent = plantuml;
@@ -222,13 +309,29 @@
         renderNote.textContent = data.render_note;
         renderNote.classList.remove("hidden");
       }
+      finishProgress(
+        generateProgressBar,
+        generateStage,
+        generateTiming,
+        "Done",
+        formatTimings(tHeaders - t0, tBody - tHeaders, tBody - t0)
+      );
       showToast("Generate completed.", "success");
     } catch {
+      tBody = performance.now();
       showToast("Network error during generate.");
+      finishProgress(
+        generateProgressBar,
+        generateStage,
+        generateTiming,
+        "Failed",
+        `total ${formatSeconds(tBody - t0)}`
+      );
     } finally {
       setGenerateBusy(false);
     }
   });
 
   setTab("extract");
+  syncGenerateDownloadState();
 })();
