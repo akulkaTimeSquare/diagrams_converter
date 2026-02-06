@@ -4,5 +4,6 @@ huggingface-hub>=0.20.0
 cairosvg>=2.7.0
 plantuml>=0.3.0
 fastapi>=0.115.0
+jinja2
 uvicorn[standard]>=0.32.0
 python-multipart>=0.0.9
