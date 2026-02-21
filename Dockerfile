@@ -1,5 +1,3 @@
-# Diagram converter with llama-cpp-python and GPU support
-# CUDA 13 driver supports CUDA 12.4 apps (backward compatible)
 FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -15,18 +13,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Minimal deps for llama-cpp backend (no torch/transformers)
+# Minimal deps for llama-cpp backend
 COPY requirements-llamacpp.txt /app/requirements-llamacpp.txt
 RUN python3 -m pip install --upgrade pip \
     && python3 -m pip install --no-cache-dir -r /app/requirements-llamacpp.txt
 
-# Install llama-cpp-python with CUDA 12.4 (works with CUDA 13 driver)
+# Install llama-cpp-python with CUDA
 RUN pip install --no-cache-dir llama-cpp-python \
     --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
 
 COPY . /app
 
-# Скачать модель на этапе сборки (q8_0 — квантизация, меньше VRAM)
 ARG LLAMA_QUANT=q8_0
 RUN python3 scripts/download_models.py --quant ${LLAMA_QUANT}
 

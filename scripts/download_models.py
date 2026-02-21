@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Скачивание GGUF-моделей Qwen2.5-VL-3B для бэкенда llama-cpp-python.
-После загрузки сервис автоматически использует файлы из каталога models/
-если установлен llama-cpp-python.
+Download GGUF models for Qwen2.5-VL-3B for llama-cpp-python backend.
+After download, the service automatically uses files from the models/ directory
+if llama-cpp-python is installed.
 
-Использование:
+Usage:
   python scripts/download_models.py
-  python scripts/download_models.py --quant q8_0   # другая квантизация (больше RAM)
+  python scripts/download_models.py --quant q8_0   # another quantization (more RAM)
 """
 import argparse
 from pathlib import Path
@@ -17,7 +17,7 @@ REPO_ID = "Mungert/Qwen2.5-VL-3B-Instruct-GGUF"
 MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
 MMPROJ_FILENAME = "Qwen2.5-VL-3B-Instruct-mmproj-f16.gguf"
 
-# Доступные квантизации и полная точность (bf16 — без квантизации, ~6.2 GB, лучшее качество)
+# Available quantizations and full precision
 QUANT_FILENAMES = {
     "q4_0": "Qwen2.5-VL-3B-Instruct-q4_0.gguf",
     "q4_k_s": "Qwen2.5-VL-3B-Instruct-q4_k_s.gguf",
@@ -26,7 +26,7 @@ QUANT_FILENAMES = {
     "q8_0": "Qwen2.5-VL-3B-Instruct-q8_0.gguf",
     "f16-q8_0": "Qwen2.5-VL-3B-Instruct-f16-q8_0.gguf",
     "bf16-q8_0": "Qwen2.5-VL-3B-Instruct-bf16-q8_0.gguf",
-    "bf16": "Qwen2.5-VL-3B-Instruct-bf16.gguf",  # полная точность, без квантизации
+    "bf16": "Qwen2.5-VL-3B-Instruct-bf16.gguf",  # no quantization
 }
 
 
@@ -36,7 +36,7 @@ def main() -> None:
         "--quant",
         default="q8_0",
         choices=list(QUANT_FILENAMES),
-        help="Квантизация или bf16 (полная точность, без квантизации); q4_k_m — экономия RAM",
+        help="Квантизация или bf16 (полная точность); q4_k_m — экономия RAM",
     )
     args = parser.parse_args()
     llm_filename = QUANT_FILENAMES[args.quant]

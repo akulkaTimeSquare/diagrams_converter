@@ -1,1 +1,1 @@
-# Diagram-to-algorithm extraction service
+"""Diagram algorithm extraction and generation package."""

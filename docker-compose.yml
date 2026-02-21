@@ -2,9 +2,8 @@ services:
   diagrams-converter:
     build:
       context: .
-      dockerfile: Dockerfile.llamacpp
+      dockerfile: Dockerfile
       args:
-        # Квантизация q8_0 (меньше VRAM)
         LLAMA_QUANT: q8_0
     image: diagrams-converter-llamacpp:latest
     container_name: diagrams-converter

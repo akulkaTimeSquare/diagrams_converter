@@ -1,9 +1,12 @@
 """
-Генерация диаграммы из текста алгоритма.
-Текст → общая VLM (Qwen2.5-VL) → PlantUML activity → PNG.
+Generate diagrams from algorithm text.
+
+Pipeline: text -> VLM (Qwen2.5-VL) -> PlantUML activity diagram -> PNG.
+Reuses the same VLM instance as diagram extraction.
 """
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Literal
@@ -14,41 +17,55 @@ from src.diagram_extractor import (
     _generate_text_with_transformers_vlm,
     _resolve_llama_paths,
 )
+from src.diagram_formats import render_plantuml_from_string
+from src.diagram_prompts import GENERATE_PROMPT
 
 logger = logging.getLogger(__name__)
 
-GENERATE_PROMPT = """По описанию алгоритма ниже сгенерируй только код PlantUML для activity-диаграммы.
-Правила:
-- Выводи ТОЛЬКО код PlantUML: без markdown, без пояснений, без текста до или после кода.
-- Начало: @startuml, конец: @enduml. Тип: activity diagram (не use case, не class).
-- Включай в диаграмму только те шаги и условия, которые есть в приведённом описании. Не добавляй своих шагов, не дополняй содержание.
-- Шаги: :Текст шага; — формулировки дословно из текста алгоритма.
-- Ветвления: if (условие?) then (да) else (нет) endif (или split). Старт: start, стоп: stop.
-- Язык подписей: русский. Не придумывай новые подписи — только из данного описания."""
+
+# PlantUML post-processing
+
+def _strip_markdown_code_blocks(text: str) -> str:
+    """Remove markdown code block wrappers (```puml, ```plantuml, ```)."""
+    text = text.strip()
+    for prefix in ("```puml", "```plantuml", "```"):
+        if text.lower().startswith(prefix):
+            text = text.split("\n", 1)[-1]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+            break
+    return text
+
+
+def _normalize_plantuml_bounds(text: str) -> str:
+    """Ensure @startuml/@enduml wrapper; extract if embedded in larger output."""
+    # Fix common typo: model sometimes writes :enduml instead of @enduml
+    text = text.replace(":enduml", "@enduml")
+    low = text.lower()
+    if "@startuml" in low:
+        start = low.index("@startuml")
+        end = low.rindex("@enduml") + len("@enduml") if "@enduml" in low else len(text)
+        text = text[start:end]
+    if not text.strip().startswith("@"):
+        text = "@startuml\n" + text + "\n@enduml"
+    # Add stop before @enduml if missing (PlantUML requires it)
+    if "@enduml" in text.lower() and not re.search(r"(?:^|\n)\s*stop\s*(?:\n|$)", text, re.IGNORECASE):
+        text = text.replace("@enduml", "stop\n@enduml")
+    return text
 
 
 def _postprocess_plantuml_response(response: str) -> str:
     """Extract and normalize PlantUML code from model output."""
-    response = response.strip()
-    for prefix in ("```puml", "```plantuml", "```"):
-        if response.lower().startswith(prefix):
-            response = response.split("\n", 1)[-1]
-            if response.endswith("```"):
-                response = response[:-3]
-            response = response.strip()
-            break
-    low = response.lower()
-    if "@startuml" in low:
-        start = low.index("@startuml")
-        end = low.rindex("@enduml") + len("@enduml") if "@enduml" in low else len(response)
-        response = response[start:end]
-    if not response.strip().startswith("@"):
-        response = "@startuml\n" + response + "\n@enduml"
-    return response
+    text = _strip_markdown_code_blocks(response)
+    text = _normalize_plantuml_bounds(text)
+    return text
 
+
+# VLM backends
 
 def _generate_text_with_llamacpp_server(messages: list[dict], max_tokens: int) -> str:
-    """Generate text using an external llama.cpp server (OpenAI-compatible)."""
+    """Generate text using an external llama.cpp server (OpenAI-compatible API)."""
     import requests
 
     url = os.environ.get("LLAMACPP_URL", "http://localhost:8080/v1/chat/completions")
@@ -68,37 +85,63 @@ def _generate_text_with_llamacpp_server(messages: list[dict], max_tokens: int) -
     return choices[0]["message"]["content"].strip()
 
 
+def _call_vlm_for_generation(
+    messages: list[dict],
+    use_gpu: bool,
+    max_tokens: int,
+) -> tuple[str, str]:
+    """
+    Call the appropriate VLM backend for text generation.
+
+    Returns: (response_text, backend_label).
+    """
+    backend = _detect_backend()
+    backend_env = os.environ.get("LLM_BACKEND", "").strip().lower()
+
+    if backend_env == "llamacpp":
+        response = _generate_text_with_llamacpp_server(messages, max_tokens)
+        return response, "llamacpp_server"
+
+    if backend == "transformers":
+        response = _generate_text_with_transformers_vlm(messages, use_gpu, max_tokens)
+        return response, "transformers"
+
+    resolved_model, resolved_mmproj = _resolve_llama_paths(None, None)
+    response = _generate_text_with_llama_cpp_vlm(
+        messages, use_gpu, max_tokens, resolved_model, resolved_mmproj
+    )
+    return response, "llama_cpp"
+
+
+# Main entry points
+
+def _build_generation_messages(algorithm_text: str) -> list[dict]:
+    """Build chat messages for PlantUML generation."""
+    return [
+        {"role": "system", "content": GENERATE_PROMPT},
+        {"role": "user", "content": f"Алгоритм:\n\n{algorithm_text}"},
+    ]
+
+
 def generate_plantuml_from_algorithm(
     algorithm_text: str,
     use_gpu: bool = False,
     max_tokens: int = 1024,
 ) -> str:
     """
-    Сгенерировать исходный код PlantUML (activity) по тексту алгоритма.
-    Использует общую загруженную VLM (Qwen2.5-VL) в режиме текст → текст.
+    Generate PlantUML (activity) source code from algorithm text.
+
+    Uses the shared VLM (Qwen2.5-VL) in text-to-text mode.
+    Backend is selected automatically: transformers, llama_cpp, or llamacpp server.
     """
-    messages = [
-        {"role": "system", "content": GENERATE_PROMPT},
-        {"role": "user", "content": f"Алгоритм:\n\n{algorithm_text}"},
-    ]
-    backend = _detect_backend()
-    backend_env = os.environ.get("LLM_BACKEND", "").strip().lower()
-    gen_start = time.perf_counter()
-    if backend_env == "llamacpp":
-        response = _generate_text_with_llamacpp_server(messages, max_tokens)
-        backend_label = "llamacpp_server"
-    elif backend == "transformers":
-        response = _generate_text_with_transformers_vlm(messages, use_gpu, max_tokens)
-        backend_label = "transformers"
-    else:
-        resolved_model, resolved_mmproj = _resolve_llama_paths(None, None)
-        response = _generate_text_with_llama_cpp_vlm(
-            messages, use_gpu, max_tokens, resolved_model, resolved_mmproj
-        )
-        backend_label = "llama_cpp"
-    gen_time = time.perf_counter() - gen_start
-    print(f"timings generate: backend={backend_label} total={gen_time:.4f}s")
-    logger.info("timings generate: backend=%s total=%.4fs", backend_label, gen_time)
+    messages = _build_generation_messages(algorithm_text)
+    start = time.perf_counter()
+
+    response, backend_label = _call_vlm_for_generation(messages, use_gpu, max_tokens)
+
+    elapsed = time.perf_counter() - start
+    logger.info("timings generate: backend=%s total=%.4fs", backend_label, elapsed)
+
     return _postprocess_plantuml_response(response)
 
 
@@ -109,15 +152,20 @@ def generate_diagram(
     max_tokens: int = 1024,
 ) -> tuple[str, Path | None]:
     """
-    По тексту алгоритма сгенерировать диаграмму.
+    Generate a diagram from algorithm text.
+
+    Args:
+        algorithm_text: Process description or list of steps.
+        output_format: "puml" for PlantUML code only; "png" to also render to PNG.
+        use_gpu: Use GPU for VLM inference.
+        max_tokens: Maximum tokens for PlantUML generation.
 
     Returns:
-        (plantuml_source, png_path): исходник PlantUML и путь к PNG (если output_format=="png" и рендер удался).
+        Tuple of (plantuml_source, png_path). png_path is None when output_format=="puml"
+        or when PlantUML render fails.
     """
-    from src.diagram_formats import render_plantuml_from_string
-
     if not (algorithm_text or algorithm_text.strip()):
-        raise ValueError("Текст алгоритма не может быть пустым")
+        raise ValueError("Algorithm text cannot be empty")
 
     plantuml_source = generate_plantuml_from_algorithm(
         algorithm_text.strip(),

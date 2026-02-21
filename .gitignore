@@ -1,4 +1,4 @@
-# Models (large GGUF files)
+# Models
 models/
 
 # Virtual environment
@@ -30,6 +30,7 @@ wheels/
 
 # IDE
 .idea/
+.cursor/
 .vscode/
 *.swp
 *.swo

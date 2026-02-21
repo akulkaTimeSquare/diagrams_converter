@@ -1,11 +1,13 @@
 """
-Препроцессинг изображений перед подачей в Qwen2.5-VL для лучшего чтения диаграмм.
-Используется только Pillow. Авто-логика: апскейл мелких, лёгкое улучшение контраста при необходимости.
+Image preprocessing before feeding into Qwen2.5-VL for better diagram reading.
+
+Uses Pillow only. Automatic logic:
+- Upscale images with short side < 512px to ~1024px.
+- Apply light contrast enhancement when brightness stddev < 40.
 """
 import os
 import tempfile
 from pathlib import Path
-
 from PIL import Image, ImageEnhance, ImageStat
 
 
@@ -18,15 +20,15 @@ MAX_LONG_SIDE = 1024
 
 def preprocess_for_vlm(image_path: Path, *, enabled: bool = True) -> Path:
     """
-    При необходимости применить препроцессинг к изображению для VLM.
+    Apply preprocessing to the image for VLM when necessary.
 
-    - enabled=False: вернуть исходный путь без изменений.
-    - Короткая сторона < 512px: апскейл до ~1024px.
-    - Низкий контраст (std яркости < 40): лёгкое улучшение контраста.
-    - Иначе: вернуть исходный путь.
+    Args:
+        image_path: Path to the source image.
+        enabled: If False, return original path without changes.
 
-    Возвращает путь к изображению для подачи в VLM. Если создан временный файл,
-    вызывающий код должен удалить его после использования.
+    Returns:
+        Path to the image to feed into VLM (original or temporary preprocessed file).
+        When preprocessing is applied, caller is responsible for cleanup.
     """
     if not enabled:
         return image_path
@@ -43,12 +45,9 @@ def preprocess_for_vlm(image_path: Path, *, enabled: bool = True) -> Path:
     w, h = img.size
     short_side = min(w, h)
     long_side = max(w, h)
-    try:
-        max_side = int(os.environ.get("MAX_IMAGE_SIDE", str(MAX_LONG_SIDE)))
-    except ValueError:
-        max_side = MAX_LONG_SIDE
+    max_side = MAX_LONG_SIDE
 
-    if max_side and long_side > max_side:
+    if long_side > max_side:
         scale = max_side / long_side
         new_w = max(1, int(w * scale))
         new_h = max(1, int(h * scale))
@@ -56,6 +55,7 @@ def preprocess_for_vlm(image_path: Path, *, enabled: bool = True) -> Path:
         w, h = img.size
         short_side = min(w, h)
         long_side = max(w, h)
+
     need_upscale = short_side < MIN_SHORT_SIDE
     need_contrast = False
     if not need_upscale:
