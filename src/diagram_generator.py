@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # PlantUML post-processing
 
 def _strip_markdown_code_blocks(text: str) -> str:
-    """Remove markdown code block wrappers (```puml, ```plantuml, ```)."""
+    """Remove markdown code block wrappers"""
     text = text.strip()
     for prefix in ("```puml", "```plantuml", "```"):
         if text.lower().startswith(prefix):
@@ -39,8 +39,8 @@ def _strip_markdown_code_blocks(text: str) -> str:
 
 
 def _normalize_plantuml_bounds(text: str) -> str:
-    """Ensure @startuml/@enduml wrapper; extract if embedded in larger output."""
-    # Fix common typo: model sometimes writes :enduml instead of @enduml
+    """Ensure @startuml/@enduml wrapper; extract if embedded in larger output"""
+    # model sometimes writes :enduml instead of @enduml
     text = text.replace(":enduml", "@enduml")
     low = text.lower()
     if "@startuml" in low:
@@ -49,14 +49,14 @@ def _normalize_plantuml_bounds(text: str) -> str:
         text = text[start:end]
     if not text.strip().startswith("@"):
         text = "@startuml\n" + text + "\n@enduml"
-    # Add stop before @enduml if missing (PlantUML requires it)
+    # Add stop before @enduml if missing
     if "@enduml" in text.lower() and not re.search(r"(?:^|\n)\s*stop\s*(?:\n|$)", text, re.IGNORECASE):
         text = text.replace("@enduml", "stop\n@enduml")
     return text
 
 
 def _postprocess_plantuml_response(response: str) -> str:
-    """Extract and normalize PlantUML code from model output."""
+    """Extract and normalize PlantUML code from model output"""
     text = _strip_markdown_code_blocks(response)
     text = _normalize_plantuml_bounds(text)
     return text
@@ -65,7 +65,7 @@ def _postprocess_plantuml_response(response: str) -> str:
 # VLM backends
 
 def _generate_text_with_llamacpp_server(messages: list[dict], max_tokens: int) -> str:
-    """Generate text using an external llama.cpp server (OpenAI-compatible API)."""
+    """Generate text using an external llama.cpp server"""
     import requests
 
     url = os.environ.get("LLAMACPP_URL", "http://localhost:8080/v1/chat/completions")
@@ -91,9 +91,9 @@ def _call_vlm_for_generation(
     max_tokens: int,
 ) -> tuple[str, str]:
     """
-    Call the appropriate VLM backend for text generation.
+    Call the appropriate VLM backend for text generation
 
-    Returns: (response_text, backend_label).
+    Returns: (response_text, backend_label)
     """
     backend = _detect_backend()
     backend_env = os.environ.get("LLM_BACKEND", "").strip().lower()
@@ -116,7 +116,7 @@ def _call_vlm_for_generation(
 # Main entry points
 
 def _build_generation_messages(algorithm_text: str) -> list[dict]:
-    """Build chat messages for PlantUML generation."""
+    """Build chat messages for PlantUML generation"""
     return [
         {"role": "system", "content": GENERATE_PROMPT},
         {"role": "user", "content": f"Алгоритм:\n\n{algorithm_text}"},
@@ -129,9 +129,9 @@ def generate_plantuml_from_algorithm(
     max_tokens: int = 1024,
 ) -> str:
     """
-    Generate PlantUML (activity) source code from algorithm text.
+    Generate PlantUML source code from algorithm text
 
-    Uses the shared VLM (Qwen2.5-VL) in text-to-text mode.
+    Uses the shared VLM in text-to-text mode.
     Backend is selected automatically: transformers, llama_cpp, or llamacpp server.
     """
     messages = _build_generation_messages(algorithm_text)

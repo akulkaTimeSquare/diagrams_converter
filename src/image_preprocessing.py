@@ -1,9 +1,9 @@
 """
-Image preprocessing before feeding into Qwen2.5-VL for better diagram reading.
+Image preprocessing before feeding into Qwen2.5-VL for better diagram reading
 
 Uses Pillow only. Automatic logic:
-- Upscale images with short side < 512px to ~1024px.
-- Apply light contrast enhancement when brightness stddev < 40.
+- Upscale images with short side < 512px to ~1024px
+- Apply light contrast enhancement when brightness stddev < 40
 """
 import os
 import tempfile
@@ -20,15 +20,15 @@ MAX_LONG_SIDE = 1024
 
 def preprocess_for_vlm(image_path: Path, *, enabled: bool = True) -> Path:
     """
-    Apply preprocessing to the image for VLM when necessary.
+    Apply preprocessing to the image for VLM when necessary
 
     Args:
-        image_path: Path to the source image.
-        enabled: If False, return original path without changes.
+        image_path: Path to the source image
+        enabled: If False, return original path without changes
 
     Returns:
-        Path to the image to feed into VLM (original or temporary preprocessed file).
-        When preprocessing is applied, caller is responsible for cleanup.
+        Path to the image to feed into VLM
+        When preprocessing is applied, caller is responsible for cleanup
     """
     if not enabled:
         return image_path

@@ -36,13 +36,13 @@ BPMN_TASK_TAGS = (
 # Helpers
 
 def _local_tag(elem: ET.Element) -> str:
-    """Get local tag name."""
+    """Get local tag name"""
     tag = elem.tag or ""
     return tag.split("}")[-1] if "}" in tag else tag
 
 
 def _strip_html(value: str) -> str:
-    """Remove HTML tags and decode common entities from a string."""
+    """Remove HTML tags and decode common entities from a string"""
     if not value:
         return ""
     return re.sub(r"<[^>]+>", " ", value).replace("&quot;", '"').replace("&lt;", "<").replace("&gt;", ">").strip()
@@ -53,7 +53,7 @@ def _format_steps_output(
     get_name: Callable,
     get_role: Callable,
 ) -> list[str]:
-    """Format steps as 'Step | Role' or 'Step' lines."""
+    """Format steps as 'Step | Role' or 'Step' lines"""
     has_roles = any(get_role(s) for s in step_order)
     header = ["Шаг\t|\tРоль"] if has_roles else ["Шаг"]
     if has_roles:
@@ -72,7 +72,6 @@ def _format_steps_output(
 # BPMN parsing
 
 def is_bpmn_xml(path: Path) -> bool:
-    """Check if the XML file resembles BPMN."""
     try:
         tree = ET.parse(path)
         root = tree.getroot()
@@ -83,7 +82,6 @@ def is_bpmn_xml(path: Path) -> bool:
 
 
 def is_drawio_xml(path: Path) -> bool:
-    """Check if the XML file resembles draw.io (diagrams.net)."""
     try:
         tree = ET.parse(path)
         root = tree.getroot()
@@ -94,7 +92,7 @@ def is_drawio_xml(path: Path) -> bool:
 
 
 def _bpmn_collect_participants_and_lanes(root: ET.Element) -> tuple[dict[str, str], dict[str, str]]:
-    """Collect participant (processRef -> role) and flowNodeRef -> lane mappings."""
+    """Collect participant (processRef -> role) and flowNodeRef -> lane mappings"""
     participant_by_process: dict[str, str] = {}
     flow_node_to_lane: dict[str, str] = {}
     lane_names: dict[str, str] = {}
@@ -120,7 +118,7 @@ def _bpmn_walk_tree(
     root: ET.Element,
 ) -> tuple[dict[str, tuple[str, str]], list[tuple[str, str]], dict[str, str], set[str], set[str]]:
     """
-    Walk BPMN tree and collect flow nodes, sequence flows, node-to-process, start events, subprocess nodes.
+    Walk BPMN tree and collect flow nodes, sequence flows, node-to-process, start events, subprocess nodes
     """
     flow_nodes: dict[str, tuple[str, str]] = {}
     sequence_flows: list[tuple[str, str]] = []
@@ -172,7 +170,7 @@ def _bpmn_compute_step_order(
     start_event_ids: set[str],
     node_inside_subprocess: set[str],
 ) -> list[str]:
-    """Compute topological order of steps from sequence flows."""
+    """Compute topological order of steps from sequence flows"""
     out_edges: dict[str, list[str]] = {}
     for src, tgt in sequence_flows:
         out_edges.setdefault(src, []).append(tgt)
@@ -218,9 +216,9 @@ def _bpmn_compute_step_order(
 
 def parse_bpmn(path):
     """
-    Extract steps and roles from BPMN file.
+    Extract steps and roles from BPMN file
 
-    Returns text description of the algorithm/process.
+    Returns text description of the algorithm/process
     """
     try:
         tree = ET.parse(path)
@@ -253,7 +251,7 @@ def parse_bpmn(path):
 # Draw.io parsing
 
 def _drawio_collect_cells_and_swimlanes(root: ET.Element) -> tuple[list[tuple[str, str, str, float, float]], dict[str, str]]:
-    """Collect mxCell text cells and swimlane labels from draw.io XML."""
+    """Collect mxCell text cells and swimlane labels from draw.io XML"""
     cells: list[tuple[str, str, str, float, float]] = []
     swimlanes: dict[str, str] = {}
     skip = {"ИСУ", "Шаг", "Роль"}
@@ -291,7 +289,7 @@ def _drawio_collect_cells_and_swimlanes(root: ET.Element) -> tuple[list[tuple[st
 
 def parse_drawio(path: Path) -> str | None:
     """
-    Extract steps from draw.io (diagrams.net) XML.
+    Extract steps from draw.io XML
 
     Roles are derived from swimlane containers.
     """
@@ -332,19 +330,19 @@ def parse_drawio(path: Path) -> str | None:
 # SVG conversion
 
 def _is_cairo_related_error(exc: Exception) -> bool:
-    """Check if exception is due to missing/unavailable Cairo library."""
+    """Check if exception is due to missing/unavailable Cairo library"""
     msg = str(exc).lower()
     return "cairo" in msg or "libcairo" in msg or "cannot load library" in msg
 
 
 def _convert_svg_cairosvg(svg_path: Path, png_path: Path) -> None:
-    """Convert SVG to PNG via cairosvg (requires system Cairo library)."""
+    """Convert SVG to PNG via cairosvg (requires system Cairo library)"""
     import cairosvg
     cairosvg.convert_file(url=str(svg_path.resolve()), write_to=str(png_path))
 
 
 def _convert_svg_resvg(svg_path: Path, png_path: Path) -> None:
-    """Convert SVG to PNG via resvg_py (works on Windows without Cairo)."""
+    """Convert SVG to PNG via resvg_py (works on Windows without Cairo)"""
     import resvg_py
     svg_str = svg_path.read_bytes().decode("utf-8", errors="replace")
     png_path.write_bytes(resvg_py.svg_to_bytes(svg_string=svg_str))
@@ -383,7 +381,7 @@ def convert_svg_to_png(svg_path: Path) -> Path:
 # PlantUML rendering
 
 def _plantuml_render_via_library(plantuml_source: str) -> bytes | None:
-    """Render PlantUML via plantuml Python package."""
+    """Render PlantUML via plantuml Python package"""
     try:
         import plantuml
         # URL must end with /img/ for PNG; package appends encoded text
@@ -404,7 +402,7 @@ def _plantuml_render_via_library(plantuml_source: str) -> bytes | None:
 
 
 def _plantuml_fetch_png_hex(plantuml_source: str) -> bytes | None:
-    """Fallback: GET request to PlantUML server with HEX encoding."""
+    """GET request to PlantUML server with HEX encoding"""
     try:
         hex_encoded = plantuml_source.encode("utf-8").hex()
         url = f"https://www.plantuml.com/plantuml/png/~h{hex_encoded}"
@@ -427,7 +425,7 @@ def _plantuml_fetch_png_hex(plantuml_source: str) -> bytes | None:
 
 
 def _write_temp_png(png_bytes: bytes) -> Path:
-    """Write bytes to a temporary PNG file and return path."""
+    """Write bytes to a temporary PNG file and return path"""
     fd, out = tempfile.mkstemp(suffix=".png")
     os.close(fd)
     Path(out).write_bytes(png_bytes)
@@ -435,7 +433,7 @@ def _write_temp_png(png_bytes: bytes) -> Path:
 
 
 def render_plantuml_from_string(plantuml_source: str) -> Path | None:
-    """Render PlantUML source code to PNG. Returns path to temporary PNG file or None on failure."""
+    """Render PlantUML source code to PNG. Returns path to temporary PNG file or None on failure"""
     if not plantuml_source or "@startuml" not in plantuml_source.lower():
         logger.warning("PlantUML render: invalid source (empty or missing @startuml)")
         return None
@@ -451,6 +449,5 @@ def render_plantuml_from_string(plantuml_source: str) -> Path | None:
 
 
 def render_plantuml_to_png(path: Path) -> Path | None:
-    """Render PlantUML (.uml/.puml) file to PNG. Requires plantuml."""
     text = path.read_text(encoding="utf-8", errors="replace")
     return render_plantuml_from_string(text)

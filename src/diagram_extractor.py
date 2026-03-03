@@ -51,7 +51,7 @@ _llama_mmproj_path: Optional[Path] = None
 # Llama.cpp config
 
 def _get_llama_quant() -> str:
-    """Get GGUF quantization from env LLAMA_QUANT (default: q8_0)."""
+    """Get GGUF quantization from env LLAMA_QUANT (default is q8_0)"""
     q = os.environ.get("LLAMA_QUANT", "q8_0").strip()
     if q in _LLAMA_QUANT_OPTIONS:
         return q
@@ -68,7 +68,7 @@ def _resolve_llama_paths(
     model_path: Optional[Path],
     mmproj_path: Optional[Path],
 ) -> tuple[Optional[Path], Optional[Path]]:
-    """Resolve GGUF and mmproj paths: env vars → explicit paths → project models/ directory."""
+    """Resolve GGUF and mmproj paths: env vars -> explicit paths -> project models/ directory"""
     out_model = Path(model_path) if model_path else None
     out_mmproj = Path(mmproj_path) if mmproj_path else None
     if os.environ.get("LLAMA_MODEL_PATH"):
@@ -89,7 +89,7 @@ def _resolve_llama_paths(
 # Backend detection
 
 def _detect_backend() -> str:
-    """Detect which backend is available: transformers or llama_cpp."""
+    """Detect which backend is available: transformers or llama_cpp"""
     global _BACKEND
     if _BACKEND is not None:
         return _BACKEND
@@ -113,14 +113,14 @@ def _detect_backend() -> str:
 
 
 def get_backend() -> str:
-    """Return the current VLM backend in use: 'llama_cpp' or 'transformers'."""
+    """Return the current VLM backend in use: 'llama_cpp' or 'transformers'"""
     return _detect_backend()
 
 
 # Transformers VLM
 
 def _log_cuda_info(use_gpu: bool) -> None:
-    """Log CUDA/VRAM info when using GPU."""
+    """Log CUDA/VRAM info when using GPU"""
     if not use_gpu:
         return
     try:
@@ -138,7 +138,7 @@ def _log_cuda_info(use_gpu: bool) -> None:
 
 
 def _build_transformers_model_kwargs(use_gpu: bool) -> dict:
-    """Build kwargs for Qwen2_5_VLForConditionalGeneration.from_pretrained."""
+    """Build kwargs for Qwen2_5_VLForConditionalGeneration.from_pretrained"""
     device_map_env = os.environ.get("FORCE_DEVICE_MAP")
     torch_dtype = "float16" if use_gpu else "auto"
     load_in_8bit = os.environ.get("LOAD_IN_8BIT", "").lower() in ("1", "true", "yes")
@@ -159,7 +159,7 @@ def _build_transformers_model_kwargs(use_gpu: bool) -> dict:
 
 
 def _get_transformers_vlm(use_gpu: bool) -> tuple[Any, Any, str]:
-    """Load or return cached Transformers VLM (model, processor, device)."""
+    """Load or return cached Transformers VLM (model, processor, device)"""
     global _transformers_model, _transformers_processor, _transformers_device, _transformers_use_gpu
     with _VLM_LOCK:
         if _transformers_model is not None and _transformers_use_gpu == use_gpu:
@@ -202,7 +202,7 @@ def _get_llama_cpp_vlm(
     mmproj_path: Optional[Path],
     n_ctx: int = 2048,
 ) -> Any:
-    """Load or return cached llama-cpp-python VLM (Llama instance)."""
+    """Load or return cached llama-cpp-python VLM (Llama instance)"""
     global _llama_llm, _llama_chat_handler, _llama_use_gpu, _llama_model_path, _llama_mmproj_path
     with _VLM_LOCK:
         if _llama_llm is not None and _llama_use_gpu == use_gpu:
@@ -248,8 +248,8 @@ def _get_llama_cpp_vlm(
 # Text generation
 
 def _make_placeholder_image_path() -> Path:
-    """Create a minimal 224x224 PNG for text-only VLM calls (processor expects at least one image).
-    Qwen2.5-VL requires minimum 224x224; smaller images cause vision encoder dimension mismatch."""
+    """Create a minimal 224x224 PNG for text-only VLM calls (processor expects at least one image)
+    Qwen2.5-VL requires minimum 224x224; smaller images cause vision encoder dimension mismatch"""
     from PIL import Image
     img = Image.new("RGB", (224, 224), color=(255, 255, 255))
     fd, path = tempfile.mkstemp(suffix=".png")
@@ -263,7 +263,7 @@ def _generate_text_with_transformers_vlm(
     use_gpu: bool,
     max_tokens: int,
 ) -> str:
-    """Generate text using cached Transformers VLM. Adds placeholder image for text-only input."""
+    """Generate text using cached Transformers VLM. Adds placeholder image for text-only input"""
     from qwen_vl_utils import process_vision_info
 
     model, processor, device = _get_transformers_vlm(use_gpu)
@@ -338,7 +338,7 @@ def _generate_text_with_llama_cpp_vlm(
     mmproj_path: Optional[Path],
     n_ctx: int = 2048,
 ) -> str:
-    """Generate text using cached llama-cpp VLM (text-only, no image)."""
+    """Generate text using cached llama-cpp VLM"""
     llm = _get_llama_cpp_vlm(use_gpu, model_path, mmproj_path, n_ctx)
     with _VLM_LOCK:
         response = llm.create_chat_completion(
@@ -354,7 +354,7 @@ def _generate_text_with_llama_cpp_vlm(
 
 
 def ensure_vlm_loaded(use_gpu: bool = False) -> None:
-    """Preload the VLM so the first request does not wait. Call at API startup."""
+    """Preload the VLM so the first request does not wait. Call at API startup"""
     backend = _detect_backend()
     if backend == "transformers":
         _get_transformers_vlm(use_gpu)
@@ -366,7 +366,7 @@ def ensure_vlm_loaded(use_gpu: bool = False) -> None:
 # Image extraction
 
 def _to_data_uri(p: Path) -> str:
-    """Convert image file to data URI for llama-cpp."""
+    """Convert image file to data URI for llama-cpp"""
     data = base64.b64encode(p.read_bytes()).decode("utf-8")
     suffix = p.suffix.lower()
     mime = "image/png" if suffix == ".png" else "image/jpeg" if suffix in (".jpg", ".jpeg") else "image/png"
@@ -374,7 +374,7 @@ def _to_data_uri(p: Path) -> str:
 
 
 def _build_extract_messages(image_path: Path, diagram_prompt: str, *, use_data_uri: bool = False) -> list[dict]:
-    """Build chat messages for extraction: system + user with image and prompt."""
+    """Build chat messages for extraction: system + user with image and prompt"""
     if use_data_uri:
         image_input = {"type": "image_url", "image_url": {"url": _to_data_uri(image_path)}}
     else:
@@ -398,7 +398,7 @@ def _extract_llama_cpp(
     n_ctx: int,
     diagram_prompt: str = DIAGRAM_PROMPT,
 ) -> str:
-    """Extract using cached llama-cpp-python + Qwen25VLChatHandler."""
+    """Extract using cached llama-cpp-python + Qwen25VLChatHandler"""
     llm = _get_llama_cpp_vlm(use_gpu, model_path, mmproj_path, n_ctx)
     messages = _build_extract_messages(image_path, diagram_prompt, use_data_uri=True)
     with _VLM_LOCK:
@@ -417,7 +417,7 @@ def _extract_transformers(
     max_tokens: int,
     diagram_prompt: str = DIAGRAM_PROMPT,
 ) -> str:
-    """Extract using cached Hugging Face Transformers + Qwen2.5-VL."""
+    """Extract using cached Hugging Face Transformers + Qwen2.5-VL"""
     from qwen_vl_utils import process_vision_info
 
     model, processor, device = _get_transformers_vlm(use_gpu)
@@ -457,7 +457,6 @@ def _extract_transformers(
 # Post-processing
 
 def _is_hallucinated_generic(text: str) -> bool:
-    """Detect generic BPMN hallucination (Создание заявки, Проверка бюджета, Утверждение)."""
     t = text.lower()
     return (
         "создание заявки" in t
@@ -468,7 +467,7 @@ def _is_hallucinated_generic(text: str) -> bool:
 
 
 def _strip_description_intro(text: str) -> str:
-    """Remove leading paragraph like 'Описание: ...' when followed by step list."""
+    """Remove leading paragraph like 'Описание: ...' when followed by step list"""
     if not text or "шаг" not in text.lower():
         return text
     lines = text.split("\n")
@@ -539,7 +538,7 @@ def _normalize_extracted_text(text: str) -> str:
 
 
 def _is_invalid_extracted_format(text: str) -> bool:
-    """Return True if output violates required header/column rules."""
+    """Return True if output violates required header/column rules"""
     if not text:
         return True
     lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
@@ -572,7 +571,7 @@ def _log_timings(
     postprocess_time: float,
     total: float,
 ) -> None:
-    """Log extraction timings."""
+    """Log extraction timings"""
     logger.info(
         "timings extract (%s): preprocess=%.4fs inference=%.4fs postprocess=%.4fs total=%.4fs",
         source, preprocess_time, inference_time, postprocess_time, total,
@@ -592,8 +591,8 @@ def _run_vlm_extraction(
     inference_time: float,
 ) -> tuple[str, float, float]:
     """
-    Run VLM extraction on raster image.
-    Returns (result_text, updated_preprocess_time, updated_inference_time).
+    Run VLM extraction on raster image
+    Returns (result_text, updated_preprocess_time, updated_inference_time)
     """
     from src.image_preprocessing import preprocess_for_vlm
 
@@ -637,19 +636,19 @@ def extract_algorithm(
     log_timings: bool = True,
 ) -> str:
     """
-    Extract algorithm description from a diagram file or image.
+    Extract algorithm description from a diagram file or image
 
     Args:
-        image_path: Path to the diagram.
-        model_path: Path to GGUF model. If None, uses HF hub.
-        mmproj_path: Path to mmproj vision encoder.
-        use_gpu: If True, use GPU for inference.
-        max_tokens: Maximum tokens to generate.
-        n_ctx: Context window size for llama-cpp.
-        use_preprocessing: If True, apply image preprocessing before VLM.
+        image_path: Path to the diagram
+        model_path: Path to GGUF model. If None, uses HF hub
+        mmproj_path: Path to mmproj vision encoder
+        use_gpu: If True, use GPU for inference
+        max_tokens: Maximum tokens to generate
+        n_ctx: Context window size for llama-cpp
+        use_preprocessing: If True, apply image preprocessing before VLM
 
     Returns:
-        Text description of the algorithm/process.
+        Text description of the algorithm/process
     """
     from src.diagram_formats import (
         SUPPORTED_EXTENSIONS,

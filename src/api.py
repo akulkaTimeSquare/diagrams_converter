@@ -34,12 +34,12 @@ templates = Jinja2Templates(directory=str(SRC_DIR / "templates"))
 
 
 def _parse_bool_env(name: str, default: bool = False) -> bool:
-    """Parse env var as boolean (1, true, yes)."""
+    """Parse env var as boolean (1, true, yes)"""
     return os.environ.get(name, "").lower() in ("1", "true", "yes")
 
 
 def _run_warmup(use_gpu: bool, warmup_runs: int) -> None:
-    """Run warmup inference to prime the VLM."""
+    """Run warmup inference to prime the VLM"""
     from PIL import Image
 
     fd, tmp_path = tempfile.mkstemp(suffix=".png")
@@ -66,10 +66,10 @@ def _run_warmup(use_gpu: bool, warmup_runs: int) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Preload VLM on startup so the first request does not wait.
+    Preload VLM on startup so the first request does not wait
 
     Skips preload if SKIP_PRELOAD env is set. Optionally runs warmup inference
-    when WARMUP_RUNS > 0.
+    when WARMUP_RUNS > 0
     """
     use_gpu = _parse_bool_env("USE_GPU")
     if _parse_bool_env("SKIP_PRELOAD"):
@@ -110,7 +110,7 @@ app.mount(
 # Pydantic models
 
 class GenerateDiagramRequest(BaseModel):
-    """Request body for generating a diagram from algorithm text."""
+    """Request body for generating a diagram from algorithm text"""
 
     algorithm_text: str = Field(..., description="Algorithm text (list of steps or process description)")
     output_format: Literal["png", "puml"] = Field(
@@ -127,7 +127,7 @@ class GenerateDiagramRequest(BaseModel):
 # Request/response helpers
 
 async def _save_upload_to_temp(file: UploadFile, suffix: str) -> Path:
-    """Save uploaded file to a temporary file. Caller must unlink when done."""
+    """Save uploaded file to a temporary file. Caller must unlink when done"""
     content = await file.read()
     fd, path = tempfile.mkstemp(suffix=suffix or ".bin")
     try:
@@ -138,7 +138,7 @@ async def _save_upload_to_temp(file: UploadFile, suffix: str) -> Path:
 
 
 def _load_png_and_cleanup(png_path: Path | None) -> bytes | None:
-    """Read PNG bytes and delete temp file. Returns None if path is None."""
+    """Read PNG bytes and delete temp file. Returns None if path is None"""
     if png_path is None:
         return None
     try:
@@ -148,7 +148,7 @@ def _load_png_and_cleanup(png_path: Path | None) -> bytes | None:
 
 
 def _format_error_with_traceback(exc: Exception) -> str:
-    """Format exception with traceback for 500 response."""
+    """Format exception with traceback for 500 response"""
     return f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}"
 
 
@@ -156,13 +156,13 @@ def _format_error_with_traceback(exc: Exception) -> str:
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def ui_home(request: Request):
-    """Serve the main UI page."""
+    """Serve the main UI page"""
     return templates.TemplateResponse("index.html", {"request": request})
 
 
 @app.get("/api")
 async def api_root():
-    """API root: links to documentation and main endpoints."""
+    """API root: links to documentation and main endpoints"""
     return {
         "service": "Diagram Algorithm Extraction API",
         "docs": "/docs",
@@ -176,7 +176,7 @@ async def api_root():
 
 @app.get("/health")
 async def health():
-    """Health check. The backend field indicates which VLM is in use: llama_cpp or transformers."""
+    """Health check. The backend field indicates which VLM is in use: llama_cpp or transformers"""
     try:
         backend = get_backend()
     except RuntimeError:
@@ -186,7 +186,7 @@ async def health():
 
 @app.get("/formats")
 async def formats():
-    """List of supported file extensions for diagram uploads."""
+    """List of supported file extensions for diagram uploads"""
     return {
         "extensions": sorted(SUPPORTED_EXTENSIONS),
         "description": "Upload files with any of these extensions to POST /extract",
@@ -203,12 +203,12 @@ async def extract(
     preprocess: Annotated[bool, Form(description="Apply image preprocessing for better VLM reading")] = True,
 ):
     """
-    Extract algorithm from an uploaded diagram.
+    Extract algorithm from an uploaded diagram
 
-    - **Images** (.png, .jpg, .svg, etc.): sent to VLM.
-    - **BPMN / drawio**: XML parsing without model, fast response.
-    - With **preprocess=true**: apply image preprocessing before VLM.
-    - Returns text description of the algorithm/process.
+    - **Images** (.png, .jpg, .svg, etc.): sent to VLM
+    - **BPMN / drawio**: XML parsing without model, fast response
+    - With **preprocess=true**: apply image preprocessing before VLM
+    - Returns text description of the algorithm/process
     """
     ext = Path(file.filename or "").suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
@@ -286,8 +286,8 @@ async def generate_diagram_endpoint(
     download: bool = Query(False, description="Return PNG as downloadable file (only when output_format=png)"),
 ):
     """
-    Send text to the shared VLM which outputs PlantUML activity diagram code.
-    With format=png the code is rendered to PNG via PlantUML service.
+    Send text to the shared VLM which outputs PlantUML activity diagram code
+    With format=png the code is rendered to PNG via PlantUML service
     """
     if download and body.output_format != "png":
         raise HTTPException(
@@ -312,7 +312,6 @@ async def generate_diagram_endpoint(
 
     if download:
         if png_bytes is None:
-            # Include plantuml snippet so user can test at plantuml.com
             snippet = plantuml_source[:500] + ("..." if len(plantuml_source) > 500 else "")
             raise HTTPException(
                 status_code=422,

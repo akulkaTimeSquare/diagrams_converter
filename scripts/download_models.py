@@ -6,7 +6,7 @@ if llama-cpp-python is installed.
 
 Usage:
   python scripts/download_models.py
-  python scripts/download_models.py --quant q8_0   # another quantization (more RAM)
+  python scripts/download_models.py --quant q8_0
 """
 import argparse
 from pathlib import Path
